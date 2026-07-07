@@ -3,13 +3,22 @@
 
 import { useState } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { inTauri } from "../lib/backend";
-import { dropRecent, readRecents, useStore } from "../state/store";
+import { backupsDir } from "../lib/extensions";
+import { backupKeep, dropRecent, readRecents, setBackupKeep, useStore } from "../state/store";
 
 export function StartScreen() {
   const store = useStore();
   const [recents, setRecents] = useState(readRecents());
+  const [keep, setKeep] = useState(backupKeep());
+  const [customKeep, setCustomKeep] = useState(![0, 10, 50].includes(backupKeep()));
   const tauri = inTauri();
+
+  const applyKeep = (n: number) => {
+    setKeep(n);
+    setBackupKeep(n);
+  };
 
   const create = async () => {
     const path = await saveDialog({
@@ -79,6 +88,43 @@ export function StartScreen() {
                 </button>
               </div>
             ))}
+          </div>
+        )}
+        {tauri && (
+          <div className="start-backup muted">
+            <span>Backup ao abrir: manter</span>
+            <select
+              className="input input-sm"
+              value={customKeep ? "custom" : String(keep)}
+              onChange={(e) => {
+                if (e.target.value === "custom") {
+                  setCustomKeep(true);
+                } else {
+                  setCustomKeep(false);
+                  applyKeep(parseInt(e.target.value, 10));
+                }
+              }}
+            >
+              <option value="0">nenhuma (desligado)</option>
+              <option value="10">10 cópias</option>
+              <option value="50">50 cópias</option>
+              <option value="custom">personalizado…</option>
+            </select>
+            {customKeep && (
+              <input
+                className="input input-sm w60"
+                inputMode="numeric"
+                value={keep}
+                onChange={(e) => applyKeep(parseInt(e.target.value.replace(/\D/g, ""), 10) || 0)}
+              />
+            )}
+            <button
+              className="btn btn-sm"
+              title="Abrir a pasta onde os backups ficam"
+              onClick={() => void backupsDir().then(openPath).catch(() => {})}
+            >
+              📂 Backups
+            </button>
           </div>
         )}
         <p className="start-foot muted">O arquivo .tbase é um SQLite comum — seus dados são seus.</p>

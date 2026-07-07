@@ -5,6 +5,7 @@ import { useState } from "react";
 import { activeTable, useStore } from "../state/store";
 import type { Choice, Field, FieldOptions, FieldType, NumberFormat, RollupAgg } from "../lib/types";
 import { CHOICE_COLORS, FIELD_TYPE_LABEL, ROLLUP_AGG_LABEL, isComputed } from "../lib/types";
+import { useExtensions } from "../lib/extensions";
 
 let choiceSeq = 0;
 function newChoiceId(): string {
@@ -36,10 +37,16 @@ export function FieldEditor({
   const [linkFieldId, setLinkFieldId] = useState(field?.options.linkFieldId ?? "");
   const [targetFieldId, setTargetFieldId] = useState(field?.options.targetFieldId ?? "");
   const [agg, setAgg] = useState<RollupAgg>(field?.options.agg ?? "count");
+  const [extTypeId, setExtTypeId] = useState(field?.options.extType ?? "");
   const [description, setDescription] = useState(field?.options.description ?? "");
   const [busy, setBusy] = useState(false);
+  const extTypes = useExtensions((s) => s.types);
 
   if (!table) return null;
+
+  const selectedExt = extTypes.find((e) => e.id === extTypeId);
+  // campo custom cuja extensão sumiu ainda precisa aparecer no seletor
+  const orphanExt = type === "custom" && extTypeId && !selectedExt ? extTypeId : null;
 
   // lookup/rollup: relações desta tabela e campos (com coluna) da tabela alvo
   const linkFields = table.fields.filter((f) => f.type === "link" && f.id !== field?.id);
@@ -63,6 +70,7 @@ export function FieldEditor({
       o.targetFieldId = targetFields.some((f) => f.id === targetFieldId) ? targetFieldId : targetFields[0]?.id ?? "";
       if (type === "rollup") o.agg = agg;
     }
+    if (type === "custom") o.extType = extTypeId;
     if (description.trim()) o.description = description.trim();
     return o;
   };
@@ -96,13 +104,45 @@ export function FieldEditor({
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Nome do campo" />
 
         <label className="form-label">Tipo</label>
-        <select className="input" value={type} onChange={(e) => setType(e.target.value as FieldType)}>
-          {(Object.keys(FIELD_TYPE_LABEL) as FieldType[]).map((t) => (
-            <option key={t} value={t}>
-              {FIELD_TYPE_LABEL[t]}
-            </option>
-          ))}
+        <select
+          className="input"
+          value={type === "custom" ? `custom:${extTypeId}` : type}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v.startsWith("custom:")) {
+              setType("custom");
+              setExtTypeId(v.slice(7));
+            } else {
+              setType(v as FieldType);
+            }
+          }}
+        >
+          {(Object.keys(FIELD_TYPE_LABEL) as FieldType[])
+            .filter((t) => t !== "custom")
+            .map((t) => (
+              <option key={t} value={t}>
+                {FIELD_TYPE_LABEL[t]}
+              </option>
+            ))}
+          {(extTypes.length > 0 || orphanExt) && (
+            <optgroup label="Extensões (🧩)">
+              {extTypes.map((e) => (
+                <option key={e.id} value={`custom:${e.id}`}>
+                  {e.icon ? `${e.icon} ` : ""}{e.name}
+                </option>
+              ))}
+              {orphanExt && (
+                <option value={`custom:${orphanExt}`}>⚠ {orphanExt} (extensão não carregada)</option>
+              )}
+            </optgroup>
+          )}
         </select>
+        {type === "custom" && selectedExt?.description && <p className="hint">{selectedExt.description}</p>}
+        {type === "custom" && !selectedExt && (
+          <p className="hint warn">
+            A extensão "{extTypeId}" não está carregada — os valores aparecem como texto simples até ela voltar.
+          </p>
+        )}
         {mode === "edit" && field && field.type !== type && (
           <p className="hint warn">Os valores existentes serão convertidos quando possível; o que não converter fica vazio.</p>
         )}
@@ -264,7 +304,7 @@ export function FieldEditor({
           </button>
           <button
             className="btn primary"
-            disabled={busy || !name.trim() || ((type === "lookup" || type === "rollup") && !viaField)}
+            disabled={busy || !name.trim() || ((type === "lookup" || type === "rollup") && !viaField) || (type === "custom" && !extTypeId)}
             onClick={() => void save()}
           >
             {mode === "new" ? "Criar campo" : "Salvar"}

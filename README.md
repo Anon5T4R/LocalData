@@ -23,6 +23,10 @@ Parte da suíte Taylor (LocalOffice, LocalSheets, LocalSlides, LocalCode, Taylor
   - **Formulário** — entrada de dados registro a registro
 - **Filtros, ordenação e busca** persistidos por view — sempre em SQL parametrizado.
 - **Duplicar** tabela (com dados), campo e view; desfazer/refazer de registros.
+- **Tipos de campo plugáveis (extensões)** — um arquivo `.js` na pasta de extensões
+  registra tipos novos (validação, máscara, cor). Ver [Extensões](#extensões).
+- **Backup automático ao abrir** — cópia da base antes de cada abertura, com
+  retenção configurável (10/50/N por base; 0 desliga). Ver [Backups](#backups).
 - **Import CSV/XLSX** com inferência de tipos (número, data, checkbox, select) e
   **export XLSX/CSV**.
 - **IA local (llama.cpp / GGUF)**: "cria uma tabela de clientes com os campos certos",
@@ -46,6 +50,46 @@ npm run tauri dev
 ```
 
 Testes: `npm test` (frontend) e `cargo test` em `src-tauri/` (backend).
+
+## Extensões
+
+Tipos de campo plugáveis, pensados pra dev de empresa que precisa de um tipo
+específico (CPF, CNPJ, placa, SKU…). Sem loja, sem sandbox: é código local seu,
+rodando na sua máquina.
+
+- **Onde:** menu 🧩 na barra superior → "Abrir pasta de extensões" (fica no
+  diretório de configuração do app). Todo `.js` da pasta é carregado ao abrir o
+  app (ou no "Recarregar extensões").
+- **Como:** o arquivo roda com a API global `localdata`. O exemplo
+  `exemplo-cpf.js` (instalado automaticamente na primeira execução) documenta
+  tudo:
+
+```js
+localdata.registerFieldType({
+  id: "cpf",                // único — fica gravado no campo
+  name: "CPF",              // nome no seletor de tipo (grupo "Extensões")
+  icon: "🪪",               // opcional
+  description: "…",         // opcional (dica no editor de campo)
+  placeholder: "…",         // opcional
+  multiline: false,         // opcional (editor vira textarea)
+  parse(texto) { /* normaliza; throw new Error(...) rejeita */ },
+  format(valor) { /* texto exibido na célula */ },
+  color(valor) { /* cor CSS do texto, ou undefined */ },
+});
+```
+
+- **Robustez:** no banco, campo de extensão é **sempre TEXT** numa coluna real —
+  busca, ordenação e filtros funcionam como texto e **nada da camada SQL depende
+  do código da extensão**. Remover a extensão não perde dados: as células voltam
+  a aparecer como texto simples.
+
+## Backups
+
+Ao abrir uma base, o app copia o arquivo pra pasta central de backups
+(`<config do app>/backups`) antes de tocar nele, e mantém as N cópias mais
+recentes **por base** (configurável na tela inicial: desligado/10/50/número
+livre). Restaurar = copiar o `.tbase` do backup de volta. A pasta abre pelo
+botão "📂 Backups" na tela inicial.
 
 ## Formato do arquivo
 

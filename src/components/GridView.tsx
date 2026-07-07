@@ -20,7 +20,7 @@ const DEFAULT_W = 180;
 const TYPE_STARTS_EDIT = new Set(["text", "long_text", "number", "url", "email", "phone"]);
 
 /** Tipos que fazem sentido como grupo na grade. */
-export const GROUPABLE_TYPES = new Set(["text", "number", "checkbox", "date", "select", "rating", "url", "email", "phone"]);
+export const GROUPABLE_TYPES = new Set(["text", "number", "checkbox", "date", "select", "rating", "url", "email", "phone", "custom"]);
 
 interface Cur {
   r: number;

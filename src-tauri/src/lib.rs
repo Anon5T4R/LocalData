@@ -21,6 +21,68 @@ fn read_file_base64(path: String) -> Result<String, String> {
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
+/// Pasta de extensões do usuário (tipos de campo plugáveis em JS).
+/// Criada na primeira consulta; fica no diretório de configuração do app.
+fn extensions_dir_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("sem pasta de configuração: {}", e))?
+        .join("extensions");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("falha ao criar '{}': {}", dir.display(), e))?;
+    Ok(dir)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionFile {
+    file: String,
+    source: String,
+}
+
+/// Lê os arquivos .js da pasta de extensões (ordem alfabética). O conteúdo é
+/// avaliado NO FRONTEND — aqui o Rust só move bytes, como sempre.
+#[tauri::command(async)]
+fn extensions_list(app: tauri::AppHandle) -> Result<Vec<ExtensionFile>, String> {
+    let dir = extensions_dir_path(&app)?;
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+        .map_err(|e| format!("falha ao ler '{}': {}", dir.display(), e))?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()).map(|x| x.eq_ignore_ascii_case("js")).unwrap_or(false))
+        .collect();
+    files.sort();
+    let mut out = Vec::new();
+    for p in files {
+        let source = std::fs::read_to_string(&p).map_err(|e| format!("falha ao ler '{}': {}", p.display(), e))?;
+        let file = p.file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string();
+        out.push(ExtensionFile { file, source });
+    }
+    Ok(out)
+}
+
+/// Caminho da pasta de extensões (a UI abre no gerenciador de arquivos).
+#[tauri::command(async)]
+fn extensions_dir(app: tauri::AppHandle) -> Result<String, String> {
+    Ok(extensions_dir_path(&app)?.to_string_lossy().to_string())
+}
+
+/// Grava um arquivo de extensão se ainda não existir (usado pra instalar o
+/// exemplo na primeira execução — nunca sobrescreve o que o usuário editou).
+#[tauri::command(async)]
+fn extensions_install_default(app: tauri::AppHandle, file: String, source: String) -> Result<bool, String> {
+    if file.contains('/') || file.contains('\\') || !file.ends_with(".js") {
+        return Err("nome de arquivo de extensão inválido".into());
+    }
+    let dir = extensions_dir_path(&app)?;
+    let dest = dir.join(&file);
+    if dest.exists() {
+        return Ok(false);
+    }
+    std::fs::write(&dest, source).map_err(|e| format!("falha ao gravar '{}': {}", dest.display(), e))?;
+    Ok(true)
+}
+
 /// Write a base64 payload to disk as binary (export XLSX/CSV).
 #[tauri::command(async)]
 fn write_file_base64(path: String, base64_data: String) -> Result<(), String> {
@@ -58,6 +120,10 @@ pub fn run() {
             get_startup_file,
             read_file_base64,
             write_file_base64,
+            extensions_list,
+            extensions_dir,
+            extensions_install_default,
+            db::backups_dir,
             db::base_create,
             db::base_open,
             db::base_close,

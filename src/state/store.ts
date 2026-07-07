@@ -30,8 +30,19 @@ import type {
 import { isComputed } from "../lib/types";
 
 const RECENTS_KEY = "localdata.recents";
+const BACKUP_KEY = "localdata.backupKeep";
 const PAGE_SIZE = 500;
 const UNDO_CAP = 100;
+
+/** Quantas cópias de backup manter por base (0 desliga; default 10). */
+export function backupKeep(): number {
+  const n = parseInt(localStorage.getItem(BACKUP_KEY) ?? "10", 10);
+  return isNaN(n) ? 10 : Math.max(0, Math.min(500, n));
+}
+
+export function setBackupKeep(n: number) {
+  localStorage.setItem(BACKUP_KEY, String(Math.max(0, Math.min(500, n))));
+}
 
 export function readRecents(): string[] {
   try {
@@ -239,7 +250,7 @@ export const useStore = create<DataState>((set, get) => {
 
     async openBase(path) {
       await guard(async () => {
-        const schema = await api.baseOpen(path);
+        const schema = await api.baseOpen(path, backupKeep());
         pushRecent(path);
         const t = firstTable(schema);
         set({

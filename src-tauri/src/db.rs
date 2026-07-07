@@ -32,7 +32,9 @@ pub struct Db(pub Mutex<Option<Base>>);
 const SCHEMA_VERSION: i64 = 1;
 
 /// Tipos de campo suportados. "formula", "lookup" e "rollup" são computados
-/// no frontend e não têm coluna.
+/// no frontend e não têm coluna. "custom" é o tipo das EXTENSÕES: no banco é
+/// sempre TEXT (validação/máscara ficam na extensão JS, no frontend) — a
+/// robustez do SQL não depende de código de terceiros.
 pub const FIELD_TYPES: &[&str] = &[
     "text",
     "long_text",
@@ -50,6 +52,7 @@ pub const FIELD_TYPES: &[&str] = &[
     "phone",
     "lookup",
     "rollup",
+    "custom",
 ];
 
 fn has_column(ftype: &str) -> bool {
@@ -58,7 +61,7 @@ fn has_column(ftype: &str) -> bool {
 
 /// Tipos armazenados como texto livre (validação leve; a UI orienta o formato).
 fn is_textlike(ftype: &str) -> bool {
-    matches!(ftype, "text" | "long_text" | "url" | "email" | "phone")
+    matches!(ftype, "text" | "long_text" | "url" | "email" | "phone" | "custom")
 }
 
 /// ID curto, estável e seguro para identificador SQL (hex + contador).
@@ -279,7 +282,7 @@ fn cell_to_sql(ftype: &str, options: &Json, v: &Json) -> Result<SqlValue, String
         return Ok(SqlValue::Null);
     }
     match ftype {
-        "text" | "long_text" | "url" | "email" | "phone" => match v {
+        "text" | "long_text" | "url" | "email" | "phone" | "custom" => match v {
             Json::String(s) => Ok(SqlValue::Text(s.clone())),
             Json::Number(n) => Ok(SqlValue::Text(n.to_string())),
             Json::Bool(b) => Ok(SqlValue::Text(b.to_string())),
@@ -646,6 +649,67 @@ fn create_default_table(conn: &Connection, name: &str) -> Result<String, String>
     Ok(tid)
 }
 
+/// Backup ao abrir: copia o arquivo pra pasta central de backups e mantém só
+/// as `keep` cópias mais novas DESTA base (hash do caminho distingue bases
+/// homônimas). Melhor esforço: falha de backup nunca impede a abertura.
+fn backup_base(app: &tauri::AppHandle, path: &PathBuf, keep: u32) {
+    use tauri::Manager;
+    if keep == 0 {
+        return;
+    }
+    let Ok(cfg) = app.path().app_config_dir() else { return };
+    let dir = cfg.join("backups");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    path.to_string_lossy().to_lowercase().hash(&mut h);
+    let tag = format!("{:08x}", h.finish() as u32);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("base");
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let dest = dir.join(format!("{}-{}-{:010}.tbase", stem, tag, ts));
+    if std::fs::copy(path, &dest).is_err() {
+        return;
+    }
+    // poda: nomes têm timestamp de largura fixa — ordenar por nome = por data
+    let prefix = format!("{}-{}-", stem, tag);
+    let mut mine: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.starts_with(&prefix))
+                        .unwrap_or(false)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    mine.sort();
+    while mine.len() > keep as usize {
+        let oldest = mine.remove(0);
+        let _ = std::fs::remove_file(oldest);
+    }
+}
+
+/// Pasta central de backups (pra UI abrir no gerenciador de arquivos).
+#[tauri::command(async)]
+pub fn backups_dir(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("sem pasta de configuração: {}", e))?
+        .join("backups");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("falha ao criar '{}': {}", dir.display(), e))?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
 fn open_connection(path: &PathBuf) -> Result<Connection, String> {
     let conn = Connection::open(path).map_err(|e| format!("falha ao abrir '{}': {}", path.display(), e))?;
     conn.busy_timeout(std::time::Duration::from_secs(5)).map_err(db_err)?;
@@ -672,11 +736,18 @@ pub fn base_create(state: State<'_, Db>, path: String) -> Result<BaseSchema, Str
 }
 
 #[tauri::command(async)]
-pub fn base_open(state: State<'_, Db>, path: String) -> Result<BaseSchema, String> {
+pub fn base_open(
+    app: tauri::AppHandle,
+    state: State<'_, Db>,
+    path: String,
+    backup_keep: Option<u32>,
+) -> Result<BaseSchema, String> {
     let p = PathBuf::from(&path);
     if !p.is_file() {
         return err(format!("arquivo não encontrado: '{}'", path));
     }
+    // antes de abrir: cópia de segurança (retenção configurável; 0 desliga)
+    backup_base(&app, &p, backup_keep.unwrap_or(10).min(500));
     let conn = open_connection(&p)?;
     // Base nova pro LocalData? Valida/instala os metadados (permite abrir um
     // SQLite alheio — ele vira uma base com as tabelas dele intocadas; só as
@@ -1070,7 +1141,7 @@ fn convert_value(old_type: &str, new_type: &str, new_options: &Json, v: &Json) -
         }
     };
     match new_type {
-        "text" | "long_text" | "url" | "email" | "phone" => {
+        "text" | "long_text" | "url" | "email" | "phone" | "custom" => {
             // select armazenava o id da opção — sem acesso às opções antigas aqui,
             // o frontend manda converter via nome quando importa (aceito o id).
             json!(as_text())
@@ -1890,6 +1961,20 @@ mod tests {
         assert!(cell_to_sql("rollup", &json!({}), &json!("x")).is_err());
         assert!(!has_column("lookup") && !has_column("rollup") && !has_column("formula"));
         assert!(has_column("rating") && has_column("url"));
+    }
+
+    #[test]
+    fn tipo_custom_e_texto_no_banco() {
+        // extensões nunca mudam a camada SQL: custom é TEXT com coluna real
+        assert!(has_column("custom"));
+        assert!(is_textlike("custom"));
+        assert!(matches!(cell_to_sql("custom", &json!({}), &json!("123.456.789-09")).unwrap(), SqlValue::Text(_)));
+        assert!(matches!(cell_to_sql("custom", &json!({}), &json!(42)).unwrap(), SqlValue::Text(_)));
+        // busca e ordenação tratam custom como texto
+        let fields = vec![FieldMeta { id: "x".into(), name: "CPF".into(), ftype: "custom".into(), options: json!({}), pos: 0 }];
+        let (w, p) = build_where(&[], &Some("789".into()), &fields).unwrap();
+        assert!(w.contains("LIKE") && p.len() == 1);
+        assert!(build_order(&[Sort { field_id: "x".into(), desc: false }], &fields).unwrap().contains("NOCASE"));
     }
 
     #[test]

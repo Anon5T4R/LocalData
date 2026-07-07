@@ -13,6 +13,7 @@ import { GalleryView } from "./components/GalleryView";
 import { FormView } from "./components/FormView";
 import { RecordModal } from "./components/RecordModal";
 import { AiPanel } from "./components/AiPanel";
+import { useExtensions } from "./lib/extensions";
 import "./App.css";
 
 const THEME_KEY = "localdata.theme";
@@ -26,6 +27,11 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
+
+  // extensões (tipos de campo plugáveis): carrega uma vez na inicialização
+  useEffect(() => {
+    void useExtensions.getState().reload();
+  }, []);
 
   // undo/redo globais (Ctrl+Z / Ctrl+Y ou Ctrl+Shift+Z) — fora de inputs
   useEffect(() => {

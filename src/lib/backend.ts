@@ -18,7 +18,8 @@ export function inTauri(): boolean {
 
 // --- base ---
 export const baseCreate = (path: string) => invoke<BaseSchema>("base_create", { path });
-export const baseOpen = (path: string) => invoke<BaseSchema>("base_open", { path });
+export const baseOpen = (path: string, backupKeep?: number) =>
+  invoke<BaseSchema>("base_open", { path, backupKeep: backupKeep ?? null });
 export const baseClose = () => invoke<void>("base_close");
 export const baseSchema = () => invoke<BaseSchema>("base_schema");
 export const getStartupFile = () => invoke<string | null>("get_startup_file");

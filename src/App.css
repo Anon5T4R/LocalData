@@ -1495,6 +1495,46 @@ body {
   white-space: nowrap;
 }
 
+/* ---------- extensões + backups ---------- */
+
+.ext-menu-wrap {
+  position: relative;
+}
+.ext-menu {
+  right: 0;
+  top: 100%;
+  min-width: 280px;
+  max-width: 360px;
+}
+.ext-menu-head {
+  padding: 8px 12px 4px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.menu-note {
+  padding: 4px 12px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-note.ext-error {
+  color: var(--danger);
+}
+.icon-btn.ext-err {
+  color: var(--danger);
+}
+
+.start-backup {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: 12px;
+}
+
 /* ---------- banner de erro ---------- */
 
 .error-banner {

@@ -18,6 +18,8 @@ async function openLink(href: string) {
 import { compileFormula, formatFormulaValue } from "../lib/formula";
 import type { AttachmentMeta, CellValue, Choice, Field, RecordRow, Table } from "../lib/types";
 import { choiceColor } from "../lib/types";
+import { extTypeSpec } from "../lib/extensions";
+import { useStore } from "../state/store";
 
 // ---------------------------------------------------------------------------
 // caches de exibição (rótulos de relação e metadados/miniaturas de anexo)
@@ -193,6 +195,17 @@ export function plainCellText(field: Field, value: CellValue, tables: Table[]): 
       const ids = Array.isArray(value) ? (value as string[]) : [];
       return ids.map((id) => attMetaCache.get(id)?.name ?? "📎").join(", ");
     }
+    case "custom": {
+      const ext = extTypeSpec(field.options.extType);
+      if (ext?.format) {
+        try {
+          return ext.format(String(value));
+        } catch {
+          /* extensão quebrada não derruba a célula */
+        }
+      }
+      return String(value);
+    }
     default:
       return String(value);
   }
@@ -339,6 +352,23 @@ export function CellDisplay({
       const n = typeof value === "number" ? value : 0;
       return <RatingStars value={n} max={max} onRate={onRate} />;
     }
+    case "custom": {
+      if (value == null || value === "") return <span />;
+      const ext = extTypeSpec(field.options.extType);
+      let text = String(value);
+      let color: string | undefined;
+      try {
+        if (ext?.format) text = ext.format(String(value));
+        if (ext?.color) color = ext.color(String(value));
+      } catch {
+        /* extensão quebrada não derruba a célula: mostra o valor cru */
+      }
+      return (
+        <span style={color ? { color } : undefined} title={ext ? undefined : `extensão "${field.options.extType}" não carregada`}>
+          {text}
+        </span>
+      );
+    }
     case "url":
     case "email":
     case "phone": {
@@ -459,6 +489,31 @@ export function CellEditor({
       return <TextEditor value={value} commit={commit} cancel={cancel} autoFocus={autoFocus} />;
     case "long_text":
       return <TextEditor value={value} commit={commit} cancel={cancel} autoFocus={autoFocus} multiline />;
+    case "custom": {
+      const ext = extTypeSpec(field.options.extType);
+      return (
+        <TextEditor
+          value={value}
+          commit={(v) => {
+            const raw = v == null ? "" : String(v);
+            if (raw === "" || !ext?.parse) {
+              commit(raw === "" ? null : raw);
+              return;
+            }
+            try {
+              commit(ext.parse(raw));
+            } catch (e) {
+              useStore.getState().setError(`${field.name}: ${e instanceof Error ? e.message : e}`);
+              cancel();
+            }
+          }}
+          cancel={cancel}
+          autoFocus={autoFocus}
+          multiline={ext?.multiline}
+          placeholder={ext?.placeholder}
+        />
+      );
+    }
     case "number":
       return <TextEditor value={value} commit={(v) => commit(parseNum(v))} cancel={cancel} autoFocus={autoFocus} numeric />;
     case "rating": {
@@ -500,6 +555,7 @@ function TextEditor({
   autoFocus,
   multiline,
   numeric,
+  placeholder,
 }: {
   value: CellValue;
   commit: (v: CellValue) => void;
@@ -507,6 +563,7 @@ function TextEditor({
   autoFocus: boolean;
   multiline?: boolean;
   numeric?: boolean;
+  placeholder?: string;
 }) {
   const [v, setV] = useState(value == null ? "" : String(value).replace(".", numeric ? "," : "."));
   const ref = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
@@ -530,6 +587,7 @@ function TextEditor({
         ref={ref as React.RefObject<HTMLTextAreaElement>}
         className="cell-input cell-textarea"
         value={v}
+        placeholder={placeholder}
         onChange={(e) => setV(e.target.value)}
         onBlur={done}
         onKeyDown={onKey}
@@ -542,6 +600,7 @@ function TextEditor({
       ref={ref as React.RefObject<HTMLInputElement>}
       className="cell-input"
       value={v}
+      placeholder={placeholder}
       inputMode={numeric ? "decimal" : undefined}
       onChange={(e) => setV(e.target.value)}
       onBlur={done}

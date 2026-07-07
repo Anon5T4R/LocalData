@@ -1,15 +1,31 @@
-// Barra superior: nome da base, abas de tabela, tema e fechar base.
+// Barra superior: nome da base, abas de tabela, extensões, tema e fechar base.
 
 import { useRef, useState } from "react";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { activeTable, useStore } from "../state/store";
+import { extensionsDir, useExtensions } from "../lib/extensions";
+import { inTauri } from "../lib/backend";
 import { useOutsideClick } from "./cells";
 
 export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme: () => void }) {
   const store = useStore();
+  const ext = useExtensions();
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [extMenu, setExtMenu] = useState(false);
   const [dragTab, setDragTab] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const extRef = useRef<HTMLDivElement>(null);
   useOutsideClick(menuRef, () => setMenuFor(null));
+  useOutsideClick(extRef, () => setExtMenu(false));
+
+  const openExtensionsFolder = async () => {
+    try {
+      const dir = await extensionsDir();
+      await openPath(dir);
+    } catch (e) {
+      store.setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const schema = store.schema;
   if (!schema) return null;
@@ -118,6 +134,53 @@ export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme:
       </nav>
       <span style={{ flex: 1 }} />
       {table && <span className="muted topbar-hint">{table.fields.length} campos</span>}
+      {inTauri() && (
+        <div className="ext-menu-wrap" ref={extRef}>
+          <button
+            className={"icon-btn" + (ext.errors.length ? " ext-err" : "")}
+            title="Extensões (tipos de campo plugáveis)"
+            onClick={() => setExtMenu(!extMenu)}
+          >
+            🧩
+          </button>
+          {extMenu && (
+            <div className="menu ext-menu">
+              <div className="ext-menu-head">Extensões — tipos de campo</div>
+              {ext.types.length === 0 && <div className="menu-note muted">Nenhum tipo registrado ainda.</div>}
+              {ext.types.map((t) => (
+                <div key={t.id} className="menu-note" title={t.description}>
+                  {t.icon ?? "🧩"} <strong>{t.name}</strong> <span className="muted">· {t.file}</span>
+                </div>
+              ))}
+              {ext.errors.map((e, i) => (
+                <div key={i} className="menu-note ext-error" title={e.message}>
+                  ⚠ {e.file}: {e.message}
+                </div>
+              ))}
+              <button
+                className="menu-item"
+                onClick={() => {
+                  setExtMenu(false);
+                  void openExtensionsFolder();
+                }}
+              >
+                📂 Abrir pasta de extensões
+              </button>
+              <button
+                className="menu-item"
+                onClick={() => {
+                  void ext.reload();
+                }}
+              >
+                ⟳ Recarregar extensões
+              </button>
+              <div className="menu-note muted">
+                Solte um .js na pasta e recarregue — o exemplo "exemplo-cpf.js" documenta a API.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       <button className="icon-btn" title="Alternar tema" onClick={onToggleTheme}>
         {theme === "dark" ? "☀" : "🌙"}
       </button>

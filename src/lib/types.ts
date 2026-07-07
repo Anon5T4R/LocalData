@@ -16,7 +16,8 @@ export type FieldType =
   | "email"
   | "phone"
   | "lookup"
-  | "rollup";
+  | "rollup"
+  | "custom";
 
 /** Campos computados no frontend: sem coluna no banco, somente leitura. */
 export function isComputed(t: FieldType): boolean {
@@ -43,6 +44,7 @@ export interface FieldOptions {
   linkFieldId?: string; // lookup/rollup: campo de relação desta tabela
   targetFieldId?: string; // lookup/rollup: campo da tabela relacionada
   agg?: RollupAgg; // rollup
+  extType?: string; // custom: id do tipo registrado por uma extensão
   description?: string; // qualquer tipo: tooltip no cabeçalho
 }
 
@@ -154,6 +156,7 @@ export const FIELD_TYPE_LABEL: Record<FieldType, string> = {
   phone: "Telefone",
   lookup: "Lookup (via relação)",
   rollup: "Rollup (agregação)",
+  custom: "Extensão",
 };
 
 export const FIELD_TYPE_ICON: Record<FieldType, string> = {
@@ -173,6 +176,7 @@ export const FIELD_TYPE_ICON: Record<FieldType, string> = {
   phone: "☎",
   lookup: "👁",
   rollup: "Σ",
+  custom: "🧩",
 };
 
 export const ROLLUP_AGG_LABEL: Record<RollupAgg, string> = {

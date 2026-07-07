@@ -4,6 +4,7 @@
 
 import type { CellValue, Choice, Field } from "./types";
 import { isComputed } from "./types";
+import { extTypeSpec } from "./extensions";
 
 /** Serializa uma matriz de textos em TSV (célula com tab/quebra vira aspas). */
 export function toTsv(matrix: string[][]): string {
@@ -147,6 +148,18 @@ export function textToCell(field: Field, text: string, choices?: Choice[]): Cell
         .filter(Boolean)
         .map((n) => all.find((c) => c.name.toLowerCase() === n.toLowerCase())?.id)
         .filter((id): id is string => !!id);
+    }
+    case "custom": {
+      if (t === "") return null;
+      const ext = extTypeSpec(field.options.extType);
+      if (ext?.parse) {
+        try {
+          return ext.parse(text);
+        } catch {
+          return null; // valor colado inválido pra extensão: célula fica vazia
+        }
+      }
+      return text;
     }
     default:
       // text, long_text, url, email, phone
