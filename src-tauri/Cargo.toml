@@ -1,6 +1,6 @@
 [package]
 name = "data"
-version = "0.4.0"
+version = "0.5.0"
 description = "LocalData — banco de dados visual offline (Airtable local) com IA local"
 authors = ["Taylor"]
 edition = "2021"
@@ -19,10 +19,17 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
 rusqlite = { version = "0.32", features = ["bundled"] }
+# modo servidor (multiusuário na LAN): HTTP síncrono e pequeno, sem tokio próprio
+tiny_http = "0.12"
+# senhas dos usuários do servidor
+argon2 = "0.5"
+# constraints de campo (validação por expressão regular)
+regex = "1"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"

@@ -17,19 +17,56 @@ use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as Json};
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::State;
 
 pub struct Base {
     pub conn: Connection,
     pub path: PathBuf,
+    /// Rastreio de mudanças pro polling (GUI local + clientes remotos):
+    /// contador global e o "quando" de cada tabela/schema.
+    pub seq: u64,
+    pub schema_seq: u64,
+    pub table_seq: HashMap<String, u64>,
 }
 
-#[derive(Default)]
-pub struct Db(pub Mutex<Option<Base>>);
+impl Base {
+    pub fn new(conn: Connection, path: PathBuf) -> Self {
+        Base { conn, path, seq: 0, schema_seq: 0, table_seq: HashMap::new() }
+    }
+
+    /// Registra mudança de DADOS numa tabela (linhas criadas/alteradas/excluídas).
+    pub fn bump_data(&mut self, table_id: &str) {
+        self.seq += 1;
+        self.table_seq.insert(table_id.to_string(), self.seq);
+    }
+
+    /// Registra mudança de SCHEMA (tabelas/campos/views/automações).
+    pub fn bump_schema(&mut self) {
+        self.seq += 1;
+        self.schema_seq = self.seq;
+    }
+}
+
+/// Estado do banco. `Clone` compartilha o MESMO banco (Arc) — é o que permite
+/// o servidor HTTP (server.rs) atender a base aberta na GUI: todos os acessos
+/// serializam no mesmo Mutex, então o SQLite nunca vê escrita concorrente.
+#[derive(Clone, Default)]
+pub struct Db(pub Arc<Mutex<Option<Base>>>);
 
 const SCHEMA_VERSION: i64 = 1;
+
+/// Nome de quem está operando: usuário do servidor (injetado pelo dispatch em
+/// server.rs) ou o usuário local da máquina.
+pub fn actor_name(actor: &Option<String>) -> String {
+    actor.clone().unwrap_or_else(|| {
+        std::env::var("USERNAME")
+            .or_else(|_| std::env::var("USER"))
+            .unwrap_or_else(|_| "local".into())
+    })
+}
 
 /// Tipos de campo suportados. "formula", "lookup" e "rollup" são computados
 /// no frontend e não têm coluna. "custom" é o tipo das EXTENSÕES: no banco é
@@ -140,7 +177,21 @@ fn init_meta(conn: &Connection) -> Result<(), String> {
             kind TEXT NOT NULL, config TEXT NOT NULL DEFAULT '{}', pos INTEGER NOT NULL DEFAULT 0);
          CREATE TABLE IF NOT EXISTS _taylor_blobs(
             id TEXT PRIMARY KEY, name TEXT NOT NULL, mime TEXT NOT NULL,
-            size INTEGER NOT NULL, data BLOB NOT NULL);",
+            size INTEGER NOT NULL, data BLOB NOT NULL);
+         CREATE TABLE IF NOT EXISTS _taylor_users(
+            id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, role TEXT NOT NULL,
+            salt TEXT NOT NULL, hash TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS _taylor_perms(
+            user_id TEXT NOT NULL, table_id TEXT NOT NULL, level TEXT NOT NULL,
+            PRIMARY KEY (user_id, table_id));
+         CREATE TABLE IF NOT EXISTS _taylor_audit(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
+            actor TEXT NOT NULL, action TEXT NOT NULL,
+            table_id TEXT, record_id INTEGER, detail TEXT NOT NULL DEFAULT '{}');
+         CREATE INDEX IF NOT EXISTS _taylor_audit_rec ON _taylor_audit(table_id, record_id);
+         CREATE TABLE IF NOT EXISTS _taylor_automations(
+            id TEXT PRIMARY KEY, table_id TEXT NOT NULL,
+            config TEXT NOT NULL DEFAULT '{}', pos INTEGER NOT NULL DEFAULT 0);",
     )
     .map_err(db_err)?;
     conn.execute(
@@ -290,7 +341,7 @@ fn cell_to_sql(ftype: &str, options: &Json, v: &Json) -> Result<SqlValue, String
         },
         "rating" => {
             // inteiro 0..max (default 5); 0/null limpa
-            let max = options.get("max").and_then(|m| m.as_i64()).unwrap_or(5).clamp(1, 10);
+            let max = options.get("ratingMax").and_then(|m| m.as_i64()).unwrap_or(5).clamp(1, 10);
             let n = match v {
                 Json::Number(n) => n.as_f64().unwrap_or(0.0),
                 Json::String(s) => {
@@ -606,12 +657,42 @@ fn build_order(sorts: &[Sort], fields: &[FieldMeta]) -> Result<String, String> {
 // Helpers de estado
 // ---------------------------------------------------------------------------
 
-fn with_base<T>(state: &State<'_, Db>, f: impl FnOnce(&mut Base) -> Result<T, String>) -> Result<T, String> {
-    let mut guard = state.0.lock().map_err(|_| "estado do banco corrompido")?;
+/// Acesso serializado à base aberta. Recebe `&Db` (não `State`) de propósito:
+/// o servidor HTTP usa exatamente o mesmo caminho que os comandos Tauri.
+pub fn with_base<T>(db: &Db, f: impl FnOnce(&mut Base) -> Result<T, String>) -> Result<T, String> {
+    let mut guard = db.0.lock().map_err(|_| "estado do banco corrompido")?;
     match guard.as_mut() {
         Some(base) => f(base),
         None => err("nenhuma base aberta"),
     }
+}
+
+/// Agora ISO (UTC) sem depender de crate de data: via SQLite.
+fn now_iso(conn: &Connection) -> String {
+    conn.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%SZ','now')", [], |r| r.get(0))
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into())
+}
+
+/// Trilha de auditoria: sempre dentro da MESMA transação da mutação.
+pub fn log_audit(
+    conn: &Connection,
+    actor: &str,
+    action: &str,
+    table_id: Option<&str>,
+    record_id: Option<i64>,
+    detail: &Json,
+) {
+    // truncamento defensivo: célula gigante não incha a trilha
+    let mut d = detail.to_string();
+    if d.len() > 4000 {
+        d.truncate(4000);
+        d.push('…');
+    }
+    let ts = now_iso(conn);
+    let _ = conn.execute(
+        "INSERT INTO _taylor_audit(ts, actor, action, table_id, record_id, detail) VALUES (?1,?2,?3,?4,?5,?6)",
+        rusqlite::params![ts, actor, action, table_id, record_id, d],
+    );
 }
 
 fn create_default_table(conn: &Connection, name: &str) -> Result<String, String> {
@@ -731,7 +812,33 @@ pub fn base_create(state: State<'_, Db>, path: String) -> Result<BaseSchema, Str
     create_default_table(&conn, "Tabela 1")?;
     let schema = read_schema(&conn, &p)?;
     let mut guard = state.0.lock().map_err(|_| "estado do banco corrompido")?;
-    *guard = Some(Base { conn, path: p });
+    *guard = Some(Base::new(conn, p));
+    Ok(schema)
+}
+
+/// Abre a base SEM Tauri (usado pelo modo headless `--serve` e pelos testes).
+pub fn open_base_impl(db: &Db, path: &str) -> Result<BaseSchema, String> {
+    let p = PathBuf::from(path);
+    if !p.is_file() {
+        return err(format!("arquivo não encontrado: '{}'", path));
+    }
+    let conn = open_connection(&p)?;
+    let version: i64 = conn
+        .query_row("SELECT value FROM _taylor_meta WHERE key = 'schema_version'", [], |r| {
+            r.get::<_, String>(0)
+        })
+        .map(|v| v.parse().unwrap_or(0))
+        .unwrap_or(0);
+    if version > SCHEMA_VERSION {
+        return err("esta base foi criada por uma versão mais nova do LocalData");
+    }
+    // Idempotente: instala/completa os metadados. Permite abrir um SQLite
+    // alheio (as tabelas dele ficam intocadas) e adiciona as _taylor_* novas
+    // (users/audit/automations) em bases criadas por versões antigas.
+    init_meta(&conn)?;
+    let schema = read_schema(&conn, &p)?;
+    let mut guard = db.0.lock().map_err(|_| "estado do banco corrompido")?;
+    *guard = Some(Base::new(conn, p));
     Ok(schema)
 }
 
@@ -748,31 +855,7 @@ pub fn base_open(
     }
     // antes de abrir: cópia de segurança (retenção configurável; 0 desliga)
     backup_base(&app, &p, backup_keep.unwrap_or(10).min(500));
-    let conn = open_connection(&p)?;
-    // Base nova pro LocalData? Valida/instala os metadados (permite abrir um
-    // SQLite alheio — ele vira uma base com as tabelas dele intocadas; só as
-    // _taylor_* são adicionadas).
-    let is_ours: Option<String> = conn
-        .query_row("SELECT value FROM _taylor_meta WHERE key = 'app'", [], |r| r.get(0))
-        .optional()
-        .unwrap_or(None);
-    if is_ours.is_none() {
-        init_meta(&conn)?;
-    }
-    let version: i64 = conn
-        .query_row("SELECT value FROM _taylor_meta WHERE key = 'schema_version'", [], |r| {
-            r.get::<_, String>(0)
-        })
-        .map(|v| v.parse().unwrap_or(0))
-        .unwrap_or(0);
-    if version > SCHEMA_VERSION {
-        return err("esta base foi criada por uma versão mais nova do LocalData");
-    }
-    // migrações futuras: while version < SCHEMA_VERSION { ... }
-    let schema = read_schema(&conn, &p)?;
-    let mut guard = state.0.lock().map_err(|_| "estado do banco corrompido")?;
-    *guard = Some(Base { conn, path: p });
-    Ok(schema)
+    open_base_impl(&state, &path)
 }
 
 #[tauri::command(async)]
@@ -788,29 +871,292 @@ pub fn base_schema(state: State<'_, Db>) -> Result<BaseSchema, String> {
 }
 
 // ---------------------------------------------------------------------------
+// Mudanças (polling): GUI local e clientes remotos perguntam "o que mudou?"
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Changes {
+    pub seq: u64,
+    pub schema_changed: bool,
+    pub tables: Vec<String>,
+}
+
+#[tauri::command(async)]
+pub fn changes_since(state: State<'_, Db>, since: u64) -> Result<Changes, String> {
+    with_base(&state, |b| {
+        Ok(Changes {
+            seq: b.seq,
+            schema_changed: b.schema_seq > since,
+            tables: b
+                .table_seq
+                .iter()
+                .filter(|(_, s)| **s > since)
+                .map(|(t, _)| t.clone())
+                .collect(),
+        })
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Usuários e permissões (modo servidor). Guardados NA BASE (_taylor_users):
+// viajam com o arquivo; quem tem o arquivo é dono (modo local = admin).
+// Papéis: leitor (só lê) < editor (lê + muda REGISTROS) < admin (tudo).
+// Override por tabela (_taylor_perms): none/read/edit — vale pros comandos de
+// registro, que sempre têm table_id explícito.
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserInfo {
+    pub id: String,
+    pub name: String,
+    pub role: String,
+    pub perms: HashMap<String, String>, // table_id -> none|read|edit
+}
+
+pub const ROLES: &[&str] = &["leitor", "editor", "admin"];
+
+fn hash_password(conn: &Connection, password: &str) -> Result<(String, String), String> {
+    use argon2::Argon2;
+    let salt: Vec<u8> = conn
+        .query_row("SELECT randomblob(16)", [], |r| r.get(0))
+        .map_err(db_err)?;
+    let mut out = [0u8; 32];
+    Argon2::default()
+        .hash_password_into(password.as_bytes(), &salt, &mut out)
+        .map_err(|e| format!("falha ao processar a senha: {}", e))?;
+    Ok((hex_of(&salt), hex_of(&out)))
+}
+
+fn hex_of(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn hex_to_bytes(s: &str) -> Vec<u8> {
+    (0..s.len() / 2)
+        .filter_map(|i| u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).ok())
+        .collect()
+}
+
+/// Confere credenciais; devolve (id, name, role) se ok.
+pub fn verify_login(db: &Db, name: &str, password: &str) -> Result<(String, String, String), String> {
+    use argon2::Argon2;
+    with_base(db, |b| {
+        let row: Option<(String, String, String, String, String)> = b
+            .conn
+            .query_row(
+                "SELECT id, name, role, salt, hash FROM _taylor_users WHERE name = ?1 COLLATE NOCASE",
+                [name],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .optional()
+            .map_err(db_err)?;
+        let (id, name, role, salt, hash) = row.ok_or("usuário ou senha inválidos")?;
+        let mut out = [0u8; 32];
+        Argon2::default()
+            .hash_password_into(password.as_bytes(), &hex_to_bytes(&salt), &mut out)
+            .map_err(|_| "usuário ou senha inválidos".to_string())?;
+        if hex_of(&out) != hash {
+            return err("usuário ou senha inválidos");
+        }
+        Ok((id, name, role))
+    })
+}
+
+/// Nível efetivo de um usuário numa tabela (considerando o papel global).
+pub fn table_level(db: &Db, user_id: &str, role: &str, table_id: &str) -> Result<String, String> {
+    let base = match role {
+        "admin" => return Ok("edit".into()),
+        "editor" => "edit",
+        _ => "read",
+    };
+    with_base(db, |b| {
+        let over: Option<String> = b
+            .conn
+            .query_row(
+                "SELECT level FROM _taylor_perms WHERE user_id = ?1 AND table_id = ?2",
+                rusqlite::params![user_id, table_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(db_err)?;
+        Ok(over.unwrap_or_else(|| base.to_string()))
+    })
+}
+
+#[tauri::command(async)]
+pub fn users_list(state: State<'_, Db>) -> Result<Vec<UserInfo>, String> {
+    with_base(&state, |b| {
+        let mut users: Vec<UserInfo> = {
+            let mut stmt = b
+                .conn
+                .prepare("SELECT id, name, role FROM _taylor_users ORDER BY name")
+                .map_err(db_err)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(UserInfo { id: r.get(0)?, name: r.get(1)?, role: r.get(2)?, perms: HashMap::new() })
+                })
+                .map_err(db_err)?;
+            rows.collect::<Result<_, _>>().map_err(db_err)?
+        };
+        for u in users.iter_mut() {
+            let mut stmt = b
+                .conn
+                .prepare("SELECT table_id, level FROM _taylor_perms WHERE user_id = ?1")
+                .map_err(db_err)?;
+            let rows = stmt
+                .query_map([&u.id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+                .map_err(db_err)?;
+            for p in rows {
+                let (t, l) = p.map_err(db_err)?;
+                u.perms.insert(t, l);
+            }
+        }
+        Ok(users)
+    })
+}
+
+/// Cria/atualiza usuário. `password` vazio em edição mantém a senha atual.
+#[tauri::command(async)]
+pub fn user_save(
+    state: State<'_, Db>,
+    id: Option<String>,
+    name: String,
+    role: String,
+    password: Option<String>,
+    actor: Option<String>,
+) -> Result<String, String> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return err("nome de usuário vazio");
+    }
+    if !ROLES.contains(&role.as_str()) {
+        return err(format!("papel desconhecido: '{}'", role));
+    }
+    let who = actor_name(&actor);
+    with_base(&state, |b| {
+        match id {
+            Some(uid) => {
+                b.conn
+                    .execute(
+                        "UPDATE _taylor_users SET name = ?1, role = ?2 WHERE id = ?3",
+                        rusqlite::params![name, role, uid],
+                    )
+                    .map_err(db_err)?;
+                if let Some(p) = password.filter(|p| !p.is_empty()) {
+                    let (salt, hash) = hash_password(&b.conn, &p)?;
+                    b.conn
+                        .execute(
+                            "UPDATE _taylor_users SET salt = ?1, hash = ?2 WHERE id = ?3",
+                            rusqlite::params![salt, hash, uid],
+                        )
+                        .map_err(db_err)?;
+                }
+                log_audit(&b.conn, &who, "user_update", None, None, &json!({ "user": name }));
+                Ok(uid)
+            }
+            None => {
+                let p = password.unwrap_or_default();
+                if p.is_empty() {
+                    return err("senha obrigatória pra usuário novo");
+                }
+                let (salt, hash) = hash_password(&b.conn, &p)?;
+                let uid = new_id();
+                b.conn
+                    .execute(
+                        "INSERT INTO _taylor_users(id, name, role, salt, hash) VALUES (?1,?2,?3,?4,?5)",
+                        rusqlite::params![uid, name, role, salt, hash],
+                    )
+                    .map_err(|e| match e {
+                        rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::ConstraintViolation => {
+                            format!("já existe um usuário chamado '{}'", name)
+                        }
+                        other => db_err(other),
+                    })?;
+                log_audit(&b.conn, &who, "user_create", None, None, &json!({ "user": name, "role": role }));
+                Ok(uid)
+            }
+        }
+    })
+}
+
+#[tauri::command(async)]
+pub fn user_delete(state: State<'_, Db>, user_id: String, actor: Option<String>) -> Result<(), String> {
+    let who = actor_name(&actor);
+    with_base(&state, |b| {
+        let name: Option<String> = b
+            .conn
+            .query_row("SELECT name FROM _taylor_users WHERE id = ?1", [&user_id], |r| r.get(0))
+            .optional()
+            .map_err(db_err)?;
+        b.conn.execute("DELETE FROM _taylor_users WHERE id = ?1", [&user_id]).map_err(db_err)?;
+        b.conn.execute("DELETE FROM _taylor_perms WHERE user_id = ?1", [&user_id]).map_err(db_err)?;
+        log_audit(&b.conn, &who, "user_delete", None, None, &json!({ "user": name }));
+        Ok(())
+    })
+}
+
+/// Define o nível de um usuário numa tabela ("" remove o override).
+#[tauri::command(async)]
+pub fn user_set_perm(
+    state: State<'_, Db>,
+    user_id: String,
+    table_id: String,
+    level: String,
+) -> Result<(), String> {
+    if !level.is_empty() && !["none", "read", "edit"].contains(&level.as_str()) {
+        return err(format!("nível desconhecido: '{}'", level));
+    }
+    with_base(&state, |b| {
+        if level.is_empty() {
+            b.conn
+                .execute(
+                    "DELETE FROM _taylor_perms WHERE user_id = ?1 AND table_id = ?2",
+                    rusqlite::params![user_id, table_id],
+                )
+                .map_err(db_err)?;
+        } else {
+            b.conn
+                .execute(
+                    "INSERT INTO _taylor_perms(user_id, table_id, level) VALUES (?1,?2,?3)
+                     ON CONFLICT(user_id, table_id) DO UPDATE SET level = excluded.level",
+                    rusqlite::params![user_id, table_id, level],
+                )
+                .map_err(db_err)?;
+        }
+        Ok(())
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Comandos: tabelas
 // ---------------------------------------------------------------------------
 
 #[tauri::command(async)]
-pub fn table_create(state: State<'_, Db>, name: String) -> Result<String, String> {
+pub fn table_create(state: State<'_, Db>, name: String, actor: Option<String>) -> Result<String, String> {
     let name = name.trim().to_string();
     if name.is_empty() {
         return err("nome de tabela vazio");
     }
+    let who = actor_name(&actor);
     with_base(&state, |b| {
         let tx = b.conn.transaction().map_err(db_err)?;
         let tid = create_default_table(&tx, &name)?;
+        log_audit(&tx, &who, "table_create", Some(&tid), None, &json!({ "name": name }));
         tx.commit().map_err(db_err)?;
+        b.bump_schema();
         Ok(tid)
     })
 }
 
 #[tauri::command(async)]
-pub fn table_rename(state: State<'_, Db>, table_id: String, name: String) -> Result<(), String> {
+pub fn table_rename(state: State<'_, Db>, table_id: String, name: String, actor: Option<String>) -> Result<(), String> {
     let name = name.trim().to_string();
     if name.is_empty() {
         return err("nome de tabela vazio");
     }
+    let who = actor_name(&actor);
     with_base(&state, |b| {
         let n = b
             .conn
@@ -819,20 +1165,30 @@ pub fn table_rename(state: State<'_, Db>, table_id: String, name: String) -> Res
         if n == 0 {
             return err("tabela não encontrada");
         }
+        log_audit(&b.conn, &who, "table_rename", Some(&table_id), None, &json!({ "name": name }));
+        b.bump_schema();
         Ok(())
     })
 }
 
 #[tauri::command(async)]
-pub fn table_delete(state: State<'_, Db>, table_id: String) -> Result<(), String> {
+pub fn table_delete(state: State<'_, Db>, table_id: String, actor: Option<String>) -> Result<(), String> {
+    let who = actor_name(&actor);
     with_base(&state, |b| {
         table_exists(&b.conn, &table_id)?;
         let tx = b.conn.transaction().map_err(db_err)?;
+        let name: Option<String> = tx
+            .query_row("SELECT name FROM _taylor_tables WHERE id = ?1", [&table_id], |r| r.get(0))
+            .optional()
+            .map_err(db_err)?;
         tx.execute(&format!("DROP TABLE IF EXISTS \"t_{}\"", table_id), []).map_err(db_err)?;
         tx.execute("DELETE FROM _taylor_fields WHERE table_id = ?1", [&table_id]).map_err(db_err)?;
         tx.execute("DELETE FROM _taylor_views WHERE table_id = ?1", [&table_id]).map_err(db_err)?;
         tx.execute("DELETE FROM _taylor_tables WHERE id = ?1", [&table_id]).map_err(db_err)?;
+        tx.execute("DELETE FROM _taylor_automations WHERE table_id = ?1", [&table_id]).map_err(db_err)?;
+        log_audit(&tx, &who, "table_delete", Some(&table_id), None, &json!({ "name": name }));
         tx.commit().map_err(db_err)?;
+        b.bump_schema();
         Ok(())
     })
 }
@@ -846,6 +1202,7 @@ pub fn tables_reorder(state: State<'_, Db>, ids: Vec<String>) -> Result<(), Stri
                 .map_err(db_err)?;
         }
         tx.commit().map_err(db_err)?;
+        b.bump_schema();
         Ok(())
     })
 }
@@ -873,7 +1230,8 @@ fn remap_json_ids(v: &Json, map: &std::collections::HashMap<String, String>) -> 
 /// referências internas remapeadas) e dados (mesmos ids de registro, então
 /// auto-relações continuam coerentes dentro da cópia).
 #[tauri::command(async)]
-pub fn table_duplicate(state: State<'_, Db>, table_id: String) -> Result<String, String> {
+pub fn table_duplicate(state: State<'_, Db>, table_id: String, actor: Option<String>) -> Result<String, String> {
+    let who = actor_name(&actor);
     with_base(&state, |b| {
         table_exists(&b.conn, &table_id)?;
         let src_name: String = b
@@ -967,7 +1325,9 @@ pub fn table_duplicate(state: State<'_, Db>, table_id: String) -> Result<String,
             )
             .map_err(db_err)?;
         }
+        log_audit(&tx, &who, "table_duplicate", Some(&new_tid), None, &json!({ "from": table_id }));
         tx.commit().map_err(db_err)?;
+        b.bump_schema();
         Ok(new_tid)
     })
 }
@@ -983,6 +1343,7 @@ pub fn field_create(
     name: String,
     field_type: String,
     options: Json,
+    actor: Option<String>,
 ) -> Result<String, String> {
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -991,6 +1352,7 @@ pub fn field_create(
     if !FIELD_TYPES.contains(&field_type.as_str()) {
         return err(format!("tipo de campo desconhecido: '{}'", field_type));
     }
+    let who = actor_name(&actor);
     with_base(&state, |b| {
         table_exists(&b.conn, &table_id)?;
         let fid = new_id();
@@ -1012,7 +1374,9 @@ pub fn field_create(
             tx.execute(&format!("ALTER TABLE \"t_{}\" ADD COLUMN \"c_{}\"", table_id, fid), [])
                 .map_err(db_err)?;
         }
+        log_audit(&tx, &who, "field_create", Some(&table_id), None, &json!({ "field": name, "type": field_type }));
         tx.commit().map_err(db_err)?;
+        b.bump_schema();
         Ok(fid)
     })
 }
@@ -1043,6 +1407,7 @@ pub fn field_update(
                 )
                 .map_err(db_err)?;
         }
+        b.bump_schema();
         Ok(())
     })
 }
@@ -1056,6 +1421,7 @@ pub fn field_change_type(
     field_id: String,
     field_type: String,
     options: Option<Json>,
+    actor: Option<String>,
 ) -> Result<Json, String> {
     if !FIELD_TYPES.contains(&field_type.as_str()) {
         return err(format!("tipo de campo desconhecido: '{}'", field_type));
@@ -1117,7 +1483,17 @@ pub fn field_change_type(
             rusqlite::params![field_type, new_options.to_string(), field_id],
         )
         .map_err(db_err)?;
+        log_audit(
+            &tx,
+            &actor_name(&actor),
+            "field_change_type",
+            Some(&table_id),
+            None,
+            &json!({ "field": field_id, "from": old_type, "to": field_type }),
+        );
         tx.commit().map_err(db_err)?;
+        b.bump_schema();
+        b.bump_data(&table_id);
         Ok(new_options)
     })
 }
@@ -1194,7 +1570,8 @@ fn convert_value(old_type: &str, new_type: &str, new_options: &Json, v: &Json) -
 }
 
 #[tauri::command(async)]
-pub fn field_delete(state: State<'_, Db>, field_id: String) -> Result<(), String> {
+pub fn field_delete(state: State<'_, Db>, field_id: String, actor: Option<String>) -> Result<(), String> {
+    let who = actor_name(&actor);
     with_base(&state, |b| {
         let (table_id, ftype, _) = field_meta(&b.conn, &field_id)?;
         let n: i64 = b
@@ -1205,12 +1582,19 @@ pub fn field_delete(state: State<'_, Db>, field_id: String) -> Result<(), String
             return err("a tabela precisa de pelo menos um campo");
         }
         let tx = b.conn.transaction().map_err(db_err)?;
+        let fname: Option<String> = tx
+            .query_row("SELECT name FROM _taylor_fields WHERE id = ?1", [&field_id], |r| r.get(0))
+            .optional()
+            .map_err(db_err)?;
         if has_column(&ftype) {
             tx.execute(&format!("ALTER TABLE \"t_{}\" DROP COLUMN \"c_{}\"", table_id, field_id), [])
                 .map_err(db_err)?;
         }
         tx.execute("DELETE FROM _taylor_fields WHERE id = ?1", [&field_id]).map_err(db_err)?;
+        log_audit(&tx, &who, "field_delete", Some(&table_id), None, &json!({ "field": fname, "type": ftype }));
         tx.commit().map_err(db_err)?;
+        b.bump_schema();
+        b.bump_data(&table_id);
         Ok(())
     })
 }
@@ -1248,6 +1632,8 @@ pub fn field_duplicate(state: State<'_, Db>, field_id: String) -> Result<String,
             .map_err(db_err)?;
         }
         tx.commit().map_err(db_err)?;
+        b.bump_schema();
+        b.bump_data(&table_id);
         Ok(new_fid)
     })
 }
@@ -1264,6 +1650,7 @@ pub fn fields_reorder(state: State<'_, Db>, table_id: String, ids: Vec<String>) 
             .map_err(db_err)?;
         }
         tx.commit().map_err(db_err)?;
+        b.bump_schema();
         Ok(())
     })
 }
@@ -1399,27 +1786,196 @@ fn validated_cells(
     Ok((cols, vals))
 }
 
+/// Constraints declarativas por campo (options): `unique`, `regex` (tipos
+/// texto), `min`/`max` (número; data como ISO). Roda DENTRO da transação da
+/// escrita — o servidor impõe pra todo cliente, não é só UI.
+/// Vazio sempre passa (obrigatório é regra de formulário, não de banco — igual
+/// ao Airtable: a grade cria linhas vazias por natureza).
+fn enforce_constraints(
+    conn: &Connection,
+    table_id: &str,
+    fields: &[FieldMeta],
+    record_id: Option<i64>,
+    map: &serde_json::Map<String, Json>,
+) -> Result<(), String> {
+    for (fid, v) in map {
+        let Some(meta) = fields.iter().find(|m| &m.id == fid) else { continue };
+        let opts = &meta.options;
+        let empty = v.is_null()
+            || v.as_str().map(|s| s.trim().is_empty()).unwrap_or(false)
+            || v.as_array().map(|a| a.is_empty()).unwrap_or(false);
+        if empty {
+            continue;
+        }
+        if opts.get("unique").and_then(|x| x.as_bool()).unwrap_or(false) {
+            let sqlv = cell_to_sql(&meta.ftype, opts, v)?;
+            let col = format!("\"c_{}\"", fid);
+            let n: i64 = match record_id {
+                Some(id) => conn
+                    .query_row(
+                        &format!("SELECT COUNT(*) FROM \"t_{}\" WHERE {} = ?1 AND id != ?2", table_id, col),
+                        rusqlite::params![sqlv, id],
+                        |r| r.get(0),
+                    )
+                    .map_err(db_err)?,
+                None => conn
+                    .query_row(
+                        &format!("SELECT COUNT(*) FROM \"t_{}\" WHERE {} = ?1", table_id, col),
+                        rusqlite::params![sqlv],
+                        |r| r.get(0),
+                    )
+                    .map_err(db_err)?,
+            };
+            if n > 0 {
+                return err(format!("campo '{}': o valor precisa ser único e já existe", meta.name));
+            }
+        }
+        if let Some(rx) = opts.get("regex").and_then(|x| x.as_str()).filter(|s| !s.is_empty()) {
+            if is_textlike(&meta.ftype) {
+                let re = regex::Regex::new(rx)
+                    .map_err(|e| format!("campo '{}': regex de validação inválida: {}", meta.name, e))?;
+                let s = v.as_str().map(|s| s.to_string()).unwrap_or_else(|| v.to_string());
+                if !re.is_match(&s) {
+                    return err(format!("campo '{}': valor não bate com o formato exigido", meta.name));
+                }
+            }
+        }
+        match meta.ftype.as_str() {
+            "number" => {
+                let n = match v {
+                    Json::Number(n) => n.as_f64(),
+                    Json::String(s) => s.trim().replace(',', ".").parse().ok(),
+                    _ => None,
+                };
+                if let Some(n) = n {
+                    if let Some(min) = opts.get("min").and_then(|x| x.as_f64()) {
+                        if n < min {
+                            return err(format!("campo '{}': mínimo é {}", meta.name, min));
+                        }
+                    }
+                    if let Some(max) = opts.get("max").and_then(|x| x.as_f64()) {
+                        if n > max {
+                            return err(format!("campo '{}': máximo é {}", meta.name, max));
+                        }
+                    }
+                }
+            }
+            "date" => {
+                if let Some(s) = v.as_str() {
+                    if let Some(min) = opts.get("min").and_then(|x| x.as_str()).filter(|m| !m.is_empty()) {
+                        if s < min {
+                            return err(format!("campo '{}': data mínima é {}", meta.name, min));
+                        }
+                    }
+                    if let Some(max) = opts.get("max").and_then(|x| x.as_str()).filter(|m| !m.is_empty()) {
+                        if s > max {
+                            return err(format!("campo '{}': data máxima é {}", meta.name, max));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Células atuais de um registro como JSON (pro "antes" da auditoria).
+fn cells_json_of(
+    conn: &Connection,
+    table_id: &str,
+    fields: &[FieldMeta],
+    record_id: i64,
+    only: &serde_json::Map<String, Json>,
+) -> Json {
+    let mut out = serde_json::Map::new();
+    for f in fields {
+        if !has_column(&f.ftype) || !only.contains_key(&f.id) {
+            continue;
+        }
+        let v = conn
+            .query_row(
+                &format!("SELECT \"c_{}\" FROM \"t_{}\" WHERE id = ?1", f.id, table_id),
+                [record_id],
+                |r| Ok(sql_to_json(&f.ftype, r.get_ref(0)?)),
+            )
+            .unwrap_or(Json::Null);
+        out.insert(f.id.clone(), v);
+    }
+    Json::Object(out)
+}
+
+/// Campos de relação (em qualquer tabela) que apontam pra `target`:
+/// (table_id, nome_da_tabela, campo).
+fn link_fields_to(conn: &Connection, target: &str) -> Result<Vec<(String, String, FieldMeta)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT f.table_id, t.name, f.id, f.name, f.type, f.options, f.pos
+             FROM _taylor_fields f JOIN _taylor_tables t ON t.id = f.table_id
+             WHERE f.type = 'link'",
+        )
+        .map_err(db_err)?;
+    let rows = stmt
+        .query_map([], |r| {
+            let opts: String = r.get(5)?;
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                FieldMeta {
+                    id: r.get(2)?,
+                    name: r.get(3)?,
+                    ftype: r.get(4)?,
+                    options: serde_json::from_str(&opts).unwrap_or(json!({})),
+                    pos: r.get(6)?,
+                },
+            ))
+        })
+        .map_err(db_err)?;
+    let mut out = Vec::new();
+    for r in rows {
+        let item = r.map_err(db_err)?;
+        if item.2.options.get("tableId").and_then(|t| t.as_str()) == Some(target) {
+            out.push(item);
+        }
+    }
+    Ok(out)
+}
+
+/// Auditoria em lote fica resumida acima deste tamanho (import gigante não
+/// incha a trilha com dezenas de milhares de linhas).
+const AUDIT_BULK_CAP: usize = 200;
+
 #[tauri::command(async)]
-pub fn record_create(state: State<'_, Db>, table_id: String, cells: Json) -> Result<i64, String> {
+pub fn record_create(
+    state: State<'_, Db>,
+    table_id: String,
+    cells: Json,
+    actor: Option<String>,
+) -> Result<i64, String> {
+    let who = actor_name(&actor);
     with_base(&state, |b| {
         table_exists(&b.conn, &table_id)?;
         let fields = table_fields(&b.conn, &table_id)?;
         let map = cells.as_object().cloned().unwrap_or_default();
         let (cols, vals) = validated_cells(&fields, &map)?;
+        let tx = b.conn.transaction().map_err(db_err)?;
+        enforce_constraints(&tx, &table_id, &fields, None, &map)?;
         if cols.is_empty() {
-            b.conn
-                .execute(&format!("INSERT INTO \"t_{}\" DEFAULT VALUES", table_id), [])
+            tx.execute(&format!("INSERT INTO \"t_{}\" DEFAULT VALUES", table_id), [])
                 .map_err(db_err)?;
         } else {
             let marks = vec!["?"; cols.len()].join(",");
-            b.conn
-                .execute(
-                    &format!("INSERT INTO \"t_{}\" ({}) VALUES ({})", table_id, cols.join(","), marks),
-                    rusqlite::params_from_iter(vals.iter()),
-                )
-                .map_err(db_err)?;
+            tx.execute(
+                &format!("INSERT INTO \"t_{}\" ({}) VALUES ({})", table_id, cols.join(","), marks),
+                rusqlite::params_from_iter(vals.iter()),
+            )
+            .map_err(db_err)?;
         }
-        Ok(b.conn.last_insert_rowid())
+        let id = tx.last_insert_rowid();
+        log_audit(&tx, &who, "create", Some(&table_id), Some(id), &json!({ "after": Json::Object(map) }));
+        tx.commit().map_err(db_err)?;
+        b.bump_data(&table_id);
+        Ok(id)
     })
 }
 
@@ -1431,10 +1987,17 @@ pub struct RecordUpdate {
 }
 
 #[tauri::command(async)]
-pub fn records_update(state: State<'_, Db>, table_id: String, updates: Vec<RecordUpdate>) -> Result<(), String> {
+pub fn records_update(
+    state: State<'_, Db>,
+    table_id: String,
+    updates: Vec<RecordUpdate>,
+    actor: Option<String>,
+) -> Result<(), String> {
+    let who = actor_name(&actor);
     with_base(&state, |b| {
         table_exists(&b.conn, &table_id)?;
         let fields = table_fields(&b.conn, &table_id)?;
+        let summarize = updates.len() > AUDIT_BULK_CAP;
         let tx = b.conn.transaction().map_err(db_err)?;
         for u in &updates {
             let map = u.cells.as_object().cloned().unwrap_or_default();
@@ -1442,6 +2005,12 @@ pub fn records_update(state: State<'_, Db>, table_id: String, updates: Vec<Recor
             if cols.is_empty() {
                 continue;
             }
+            enforce_constraints(&tx, &table_id, &fields, Some(u.id), &map)?;
+            let before = if summarize {
+                Json::Null
+            } else {
+                cells_json_of(&tx, &table_id, &fields, u.id, &map)
+            };
             let sets = cols.iter().map(|c| format!("{} = ?", c)).collect::<Vec<_>>().join(", ");
             vals.push(SqlValue::Integer(u.id));
             let n = tx
@@ -1453,26 +2022,114 @@ pub fn records_update(state: State<'_, Db>, table_id: String, updates: Vec<Recor
             if n == 0 {
                 return err(format!("registro {} não encontrado", u.id));
             }
+            if !summarize {
+                log_audit(
+                    &tx,
+                    &who,
+                    "update",
+                    Some(&table_id),
+                    Some(u.id),
+                    &json!({ "before": before, "after": Json::Object(map) }),
+                );
+            }
+        }
+        if summarize {
+            log_audit(&tx, &who, "update_bulk", Some(&table_id), None, &json!({ "count": updates.len() }));
         }
         tx.commit().map_err(db_err)?;
+        b.bump_data(&table_id);
         Ok(())
     })
 }
 
 #[tauri::command(async)]
-pub fn records_delete(state: State<'_, Db>, table_id: String, ids: Vec<i64>) -> Result<(), String> {
+pub fn records_delete(
+    state: State<'_, Db>,
+    table_id: String,
+    ids: Vec<i64>,
+    actor: Option<String>,
+) -> Result<(), String> {
+    use std::collections::HashSet;
+    let who = actor_name(&actor);
     with_base(&state, |b| {
         table_exists(&b.conn, &table_id)?;
         if ids.is_empty() {
             return Ok(());
         }
+        let fields = table_fields(&b.conn, &table_id)?;
+        let idset: HashSet<i64> = ids.iter().cloned().collect();
+        let tx = b.conn.transaction().map_err(db_err)?;
+
+        // Integridade referencial: quem aponta pros registros excluídos?
+        // - campo com onDelete "restrict": exclusão é bloqueada com a origem;
+        // - padrão ("unlink"): as referências são REMOVIDAS na mesma transação
+        //   (nada de id órfão sobrando em outras tabelas).
+        let mut touched: HashSet<String> = HashSet::new();
+        let mut unlinked = 0usize;
+        for (rt, rt_name, f) in link_fields_to(&tx, &table_id)? {
+            let restrict = f.options.get("onDelete").and_then(|x| x.as_str()) == Some("restrict");
+            let col = format!("\"c_{}\"", f.id);
+            let sql = format!(
+                "SELECT id, {} FROM \"t_{}\" WHERE {} IS NOT NULL AND {} != '[]' AND {} != ''",
+                col, rt, col, col, col
+            );
+            let cells: Vec<(i64, String)> = {
+                let mut stmt = tx.prepare(&sql).map_err(db_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+                    .map_err(db_err)?;
+                rows.collect::<Result<_, _>>().map_err(db_err)?
+            };
+            for (rid, raw) in cells {
+                // auto-relação: linha que também está sendo excluída não conta
+                if rt == table_id && idset.contains(&rid) {
+                    continue;
+                }
+                let Ok(Json::Array(arr)) = serde_json::from_str::<Json>(&raw) else { continue };
+                let refs: Vec<i64> = arr.iter().filter_map(|x| x.as_i64()).collect();
+                if !refs.iter().any(|r| idset.contains(r)) {
+                    continue;
+                }
+                if restrict {
+                    return err(format!(
+                        "não dá pra excluir: o registro é referenciado por '{}' (campo '{}', registro {}) — o campo está configurado pra impedir",
+                        rt_name, f.name, rid
+                    ));
+                }
+                let kept: Vec<i64> = refs.into_iter().filter(|r| !idset.contains(r)).collect();
+                tx.execute(
+                    &format!("UPDATE \"t_{}\" SET {} = ?1 WHERE id = ?2", rt, col),
+                    rusqlite::params![serde_json::to_string(&kept).unwrap_or_default(), rid],
+                )
+                .map_err(db_err)?;
+                touched.insert(rt.clone());
+                unlinked += 1;
+            }
+        }
+
+        // auditoria: guarda as células de cada registro excluído (é o "antes")
+        if ids.len() <= AUDIT_BULK_CAP {
+            for id in &ids {
+                let all: serde_json::Map<String, Json> =
+                    fields.iter().filter(|f| has_column(&f.ftype)).map(|f| (f.id.clone(), Json::Null)).collect();
+                let cells = cells_json_of(&tx, &table_id, &fields, *id, &all);
+                log_audit(&tx, &who, "delete", Some(&table_id), Some(*id), &json!({ "before": cells, "unlinked": unlinked }));
+            }
+        } else {
+            log_audit(&tx, &who, "delete_bulk", Some(&table_id), None, &json!({ "count": ids.len(), "unlinked": unlinked }));
+        }
+
         let marks = vec!["?"; ids.len()].join(",");
-        b.conn
-            .execute(
-                &format!("DELETE FROM \"t_{}\" WHERE id IN ({})", table_id, marks),
-                rusqlite::params_from_iter(ids.iter()),
-            )
-            .map_err(db_err)?;
+        tx.execute(
+            &format!("DELETE FROM \"t_{}\" WHERE id IN ({})", table_id, marks),
+            rusqlite::params_from_iter(ids.iter()),
+        )
+        .map_err(db_err)?;
+        tx.commit().map_err(db_err)?;
+        b.bump_data(&table_id);
+        for t in touched {
+            b.bump_data(&t);
+        }
         Ok(())
     })
 }
@@ -1480,15 +2137,23 @@ pub fn records_delete(state: State<'_, Db>, table_id: String, ids: Vec<i64>) -> 
 /// Insere em lote (uma transação) e devolve os ids criados, na ordem — o
 /// frontend precisa deles pro undo/redo e pra abrir o registro recém-criado.
 #[tauri::command(async)]
-pub fn records_insert_bulk(state: State<'_, Db>, table_id: String, rows: Vec<Json>) -> Result<Vec<i64>, String> {
+pub fn records_insert_bulk(
+    state: State<'_, Db>,
+    table_id: String,
+    rows: Vec<Json>,
+    actor: Option<String>,
+) -> Result<Vec<i64>, String> {
+    let who = actor_name(&actor);
     with_base(&state, |b| {
         table_exists(&b.conn, &table_id)?;
         let fields = table_fields(&b.conn, &table_id)?;
+        let summarize = rows.len() > AUDIT_BULK_CAP;
         let tx = b.conn.transaction().map_err(db_err)?;
         let mut ids = Vec::with_capacity(rows.len());
         for row in &rows {
             let map = row.as_object().cloned().unwrap_or_default();
             let (cols, vals) = validated_cells(&fields, &map)?;
+            enforce_constraints(&tx, &table_id, &fields, None, &map)?;
             if cols.is_empty() {
                 tx.execute(&format!("INSERT INTO \"t_{}\" DEFAULT VALUES", table_id), [])
                     .map_err(db_err)?;
@@ -1500,9 +2165,17 @@ pub fn records_insert_bulk(state: State<'_, Db>, table_id: String, rows: Vec<Jso
                 )
                 .map_err(db_err)?;
             }
-            ids.push(tx.last_insert_rowid());
+            let id = tx.last_insert_rowid();
+            if !summarize {
+                log_audit(&tx, &who, "create", Some(&table_id), Some(id), &json!({ "after": Json::Object(map) }));
+            }
+            ids.push(id);
+        }
+        if summarize {
+            log_audit(&tx, &who, "create_bulk", Some(&table_id), None, &json!({ "count": rows.len() }));
         }
         tx.commit().map_err(db_err)?;
+        b.bump_data(&table_id);
         Ok(ids)
     })
 }
@@ -1512,7 +2185,13 @@ pub fn records_insert_bulk(state: State<'_, Db>, table_id: String, rows: Vec<Jso
 /// então re-inserir com id explícito não colide com registros novos. Assim as
 /// relações (arrays de ids em campos link) continuam apontando certo.
 #[tauri::command(async)]
-pub fn records_restore(state: State<'_, Db>, table_id: String, rows: Vec<Json>) -> Result<(), String> {
+pub fn records_restore(
+    state: State<'_, Db>,
+    table_id: String,
+    rows: Vec<Json>,
+    actor: Option<String>,
+) -> Result<(), String> {
+    let who = actor_name(&actor);
     with_base(&state, |b| {
         table_exists(&b.conn, &table_id)?;
         let fields = table_fields(&b.conn, &table_id)?;
@@ -1524,6 +2203,7 @@ pub fn records_restore(state: State<'_, Db>, table_id: String, rows: Vec<Json>) 
                 .and_then(|c| c.as_object())
                 .cloned()
                 .unwrap_or_default();
+            // restore é undo: sem constraints (o dado é o que era antes)
             let (mut cols, mut vals) = validated_cells(&fields, &map)?;
             cols.insert(0, "id".into());
             vals.insert(0, SqlValue::Integer(id));
@@ -1534,8 +2214,155 @@ pub fn records_restore(state: State<'_, Db>, table_id: String, rows: Vec<Json>) 
             )
             .map_err(db_err)?;
         }
+        log_audit(&tx, &who, "restore", Some(&table_id), None, &json!({ "count": rows.len() }));
         tx.commit().map_err(db_err)?;
+        b.bump_data(&table_id);
         Ok(())
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Agregações no SQL (rodapé da grade e relatórios): O(1) de memória no front,
+// vale mesmo com a tabela só parcialmente carregada.
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AggSpec {
+    pub field_id: String,
+    pub kind: String, // filled | sum | avg | min | max
+}
+
+#[tauri::command(async)]
+pub fn records_aggregate(
+    state: State<'_, Db>,
+    table_id: String,
+    filters: Option<Vec<Filter>>,
+    search: Option<String>,
+    aggs: Vec<AggSpec>,
+) -> Result<Json, String> {
+    with_base(&state, |b| {
+        table_exists(&b.conn, &table_id)?;
+        let fields = table_fields(&b.conn, &table_id)?;
+        let (where_sql, params) = build_where(&filters.unwrap_or_default(), &search, &fields)?;
+        let mut selects: Vec<String> = Vec::new();
+        let mut order: Vec<&AggSpec> = Vec::new();
+        for a in &aggs {
+            let meta = fields.iter().find(|m| m.id == a.field_id);
+            let Some(meta) = meta else { continue };
+            if !has_column(&meta.ftype) {
+                continue;
+            }
+            let col = format!("\"c_{}\"", meta.id);
+            let expr = match a.kind.as_str() {
+                "filled" => format!(
+                    "SUM(CASE WHEN {0} IS NOT NULL AND {0} != '' AND {0} != '[]' THEN 1 ELSE 0 END)",
+                    col
+                ),
+                "sum" => format!("SUM(CAST({} AS REAL))", col),
+                "avg" => format!("AVG(CAST({} AS REAL))", col),
+                "min" => format!("MIN(CAST({} AS REAL))", col),
+                "max" => format!("MAX(CAST({} AS REAL))", col),
+                _ => continue,
+            };
+            selects.push(expr);
+            order.push(a);
+        }
+        if selects.is_empty() {
+            return Ok(json!({}));
+        }
+        let sql = format!("SELECT {} FROM \"t_{}\"{}", selects.join(", "), table_id, where_sql);
+        let out = b
+            .conn
+            .query_row(&sql, rusqlite::params_from_iter(params.iter()), |r| {
+                let mut m = serde_json::Map::new();
+                for (i, a) in order.iter().enumerate() {
+                    let v: Option<f64> = r.get(i).ok();
+                    m.insert(
+                        format!("{}:{}", a.field_id, a.kind),
+                        v.map(|f| json!(f)).unwrap_or(Json::Null),
+                    );
+                }
+                Ok(Json::Object(m))
+            })
+            .map_err(db_err)?;
+        Ok(out)
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Auditoria: consulta (a escrita acontece dentro das mutações)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEntry {
+    pub id: i64,
+    pub ts: String,
+    pub actor: String,
+    pub action: String,
+    pub table_id: Option<String>,
+    pub record_id: Option<i64>,
+    pub detail: Json,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditPage {
+    pub entries: Vec<AuditEntry>,
+    pub total: i64,
+}
+
+#[tauri::command(async)]
+pub fn audit_query(
+    state: State<'_, Db>,
+    table_id: Option<String>,
+    record_id: Option<i64>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<AuditPage, String> {
+    with_base(&state, |b| {
+        let mut where_sql = String::new();
+        let mut params: Vec<SqlValue> = Vec::new();
+        if let Some(t) = &table_id {
+            where_sql.push_str(" WHERE table_id = ?");
+            params.push(SqlValue::Text(t.clone()));
+            if let Some(r) = record_id {
+                where_sql.push_str(" AND record_id = ?");
+                params.push(SqlValue::Integer(r));
+            }
+        }
+        let total: i64 = b
+            .conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM _taylor_audit{}", where_sql),
+                rusqlite::params_from_iter(params.iter()),
+                |r| r.get(0),
+            )
+            .map_err(db_err)?;
+        let sql = format!(
+            "SELECT id, ts, actor, action, table_id, record_id, detail FROM _taylor_audit{} ORDER BY id DESC LIMIT {} OFFSET {}",
+            where_sql,
+            limit.unwrap_or(100).clamp(1, 500),
+            offset.unwrap_or(0).max(0)
+        );
+        let mut stmt = b.conn.prepare(&sql).map_err(db_err)?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(params.iter()), |r| {
+                let detail: String = r.get(6)?;
+                Ok(AuditEntry {
+                    id: r.get(0)?,
+                    ts: r.get(1)?,
+                    actor: r.get(2)?,
+                    action: r.get(3)?,
+                    table_id: r.get(4)?,
+                    record_id: r.get(5)?,
+                    detail: serde_json::from_str(&detail).unwrap_or(json!({})),
+                })
+            })
+            .map_err(db_err)?;
+        let entries = rows.collect::<Result<_, _>>().map_err(db_err)?;
+        Ok(AuditPage { entries, total })
     })
 }
 
@@ -1572,6 +2399,7 @@ pub fn view_create(
                 rusqlite::params![vid, table_id, name, kind, config.to_string(), pos],
             )
             .map_err(db_err)?;
+        b.bump_schema();
         Ok(vid)
     })
 }
@@ -1597,6 +2425,7 @@ pub fn view_update(
                 )
                 .map_err(db_err)?;
         }
+        b.bump_schema();
         Ok(())
     })
 }
@@ -1630,6 +2459,7 @@ pub fn view_duplicate(state: State<'_, Db>, view_id: String) -> Result<String, S
                 rusqlite::params![new_vid, table_id, format!("{} (cópia)", name), kind, config, pos],
             )
             .map_err(db_err)?;
+        b.bump_schema();
         Ok(new_vid)
     })
 }
@@ -1651,6 +2481,104 @@ pub fn view_delete(state: State<'_, Db>, view_id: String) -> Result<(), String> 
             return err("a tabela precisa de pelo menos uma view");
         }
         b.conn.execute("DELETE FROM _taylor_views WHERE id = ?1", [&view_id]).map_err(db_err)?;
+        b.bump_schema();
+        Ok(())
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Automações (regras por tabela; a execução acontece no frontend de quem
+// fez a edição — ver src/lib/automations.ts). Config é JSON opaco pro Rust.
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationMeta {
+    pub id: String,
+    pub table_id: String,
+    pub config: Json,
+    pub pos: i64,
+}
+
+#[tauri::command(async)]
+pub fn automations_list(state: State<'_, Db>, table_id: Option<String>) -> Result<Vec<AutomationMeta>, String> {
+    with_base(&state, |b| {
+        let (sql, param): (&str, Vec<String>) = match &table_id {
+            Some(t) => (
+                "SELECT id, table_id, config, pos FROM _taylor_automations WHERE table_id = ?1 ORDER BY pos, rowid",
+                vec![t.clone()],
+            ),
+            None => ("SELECT id, table_id, config, pos FROM _taylor_automations ORDER BY pos, rowid", vec![]),
+        };
+        let mut stmt = b.conn.prepare(sql).map_err(db_err)?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(param.iter()), |r| {
+                let cfg: String = r.get(2)?;
+                Ok(AutomationMeta {
+                    id: r.get(0)?,
+                    table_id: r.get(1)?,
+                    config: serde_json::from_str(&cfg).unwrap_or(json!({})),
+                    pos: r.get(3)?,
+                })
+            })
+            .map_err(db_err)?;
+        rows.collect::<Result<_, _>>().map_err(db_err)
+    })
+}
+
+#[tauri::command(async)]
+pub fn automation_save(
+    state: State<'_, Db>,
+    id: Option<String>,
+    table_id: String,
+    config: Json,
+    actor: Option<String>,
+) -> Result<String, String> {
+    let who = actor_name(&actor);
+    with_base(&state, |b| {
+        table_exists(&b.conn, &table_id)?;
+        let aid = match id {
+            Some(aid) => {
+                b.conn
+                    .execute(
+                        "UPDATE _taylor_automations SET config = ?1 WHERE id = ?2",
+                        rusqlite::params![config.to_string(), aid],
+                    )
+                    .map_err(db_err)?;
+                aid
+            }
+            None => {
+                let aid = new_id();
+                let pos: i64 = b
+                    .conn
+                    .query_row(
+                        "SELECT COALESCE(MAX(pos), -1) + 1 FROM _taylor_automations WHERE table_id = ?1",
+                        [&table_id],
+                        |r| r.get(0),
+                    )
+                    .map_err(db_err)?;
+                b.conn
+                    .execute(
+                        "INSERT INTO _taylor_automations(id, table_id, config, pos) VALUES (?1,?2,?3,?4)",
+                        rusqlite::params![aid, table_id, config.to_string(), pos],
+                    )
+                    .map_err(db_err)?;
+                aid
+            }
+        };
+        log_audit(&b.conn, &who, "automation_save", Some(&table_id), None, &json!({ "id": aid }));
+        b.bump_schema();
+        Ok(aid)
+    })
+}
+
+#[tauri::command(async)]
+pub fn automation_delete(state: State<'_, Db>, id: String, actor: Option<String>) -> Result<(), String> {
+    let who = actor_name(&actor);
+    with_base(&state, |b| {
+        b.conn.execute("DELETE FROM _taylor_automations WHERE id = ?1", [&id]).map_err(db_err)?;
+        log_audit(&b.conn, &who, "automation_delete", None, None, &json!({ "id": id }));
+        b.bump_schema();
         Ok(())
     })
 }
@@ -1709,6 +2637,28 @@ pub fn attachment_import(state: State<'_, Db>, paths: Vec<String>) -> Result<Vec
         }
         tx.commit().map_err(db_err)?;
         Ok(out)
+    })
+}
+
+/// Sobe um anexo por conteúdo (cliente remoto: o arquivo é local NELE, então
+/// os bytes chegam em base64 — o caminho nunca atravessa a rede).
+#[tauri::command(async)]
+pub fn attachment_upload(state: State<'_, Db>, name: String, base64_data: String) -> Result<AttachmentMeta, String> {
+    use base64::Engine;
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(base64_data.as_bytes())
+        .map_err(|e| format!("base64 inválido: {}", e))?;
+    with_base(&state, |b| {
+        let id = new_id();
+        let mime = guess_mime(&name).to_string();
+        let size = data.len() as i64;
+        b.conn
+            .execute(
+                "INSERT INTO _taylor_blobs(id, name, mime, size, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![id, name, mime, size, data],
+            )
+            .map_err(db_err)?;
+        Ok(AttachmentMeta { id, name, mime, size })
     })
 }
 
@@ -1814,7 +2764,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         init_meta(&conn).unwrap();
         create_default_table(&conn, "Tarefas").unwrap();
-        Base { conn, path: PathBuf::from("test.tbase") }
+        Base::new(conn, PathBuf::from("test.tbase"))
     }
 
     #[test]
@@ -1950,7 +2900,7 @@ mod tests {
         // rating: arredonda, limita ao max e 0 vira NULL
         assert!(matches!(cell_to_sql("rating", &json!({}), &json!(3)).unwrap(), SqlValue::Integer(3)));
         assert!(matches!(cell_to_sql("rating", &json!({}), &json!(9)).unwrap(), SqlValue::Integer(5)));
-        assert!(matches!(cell_to_sql("rating", &json!({"max": 10}), &json!(9)).unwrap(), SqlValue::Integer(9)));
+        assert!(matches!(cell_to_sql("rating", &json!({"ratingMax": 10}), &json!(9)).unwrap(), SqlValue::Integer(9)));
         assert!(matches!(cell_to_sql("rating", &json!({}), &json!(0)).unwrap(), SqlValue::Null));
         assert!(matches!(cell_to_sql("rating", &json!({}), &json!("4,4")).unwrap(), SqlValue::Integer(4)));
         // url/email/phone armazenam texto
@@ -2014,6 +2964,182 @@ mod tests {
         assert_eq!(remapped["hiddenFields"][0], json!(format!("n{}", f0)));
         assert_eq!(remapped["widths"][&format!("n{}", f0)], json!(240));
         assert!(remapped["widths"].get(&f0).is_none());
+    }
+
+    /// insere um registro validando+constraints, como os comandos fazem.
+    fn insert_row(b: &Base, table_id: &str, map: serde_json::Map<String, Json>) -> Result<i64, String> {
+        let fields = table_fields(&b.conn, table_id).unwrap();
+        let (cols, vals) = validated_cells(&fields, &map)?;
+        enforce_constraints(&b.conn, table_id, &fields, None, &map)?;
+        let marks = vec!["?"; cols.len()].join(",");
+        b.conn
+            .execute(
+                &format!("INSERT INTO \"t_{}\" ({}) VALUES ({})", table_id, cols.join(","), marks),
+                rusqlite::params_from_iter(vals.iter()),
+            )
+            .map_err(db_err)?;
+        Ok(b.conn.last_insert_rowid())
+    }
+
+    #[test]
+    fn constraint_unico_bloqueia_repetido() {
+        let b = memory_base();
+        let s = read_schema(&b.conn, &b.path).unwrap();
+        let f0 = s.tables[0].fields[0].id.clone();
+        // marca o campo primário como único
+        b.conn
+            .execute(
+                "UPDATE _taylor_fields SET options = ?1 WHERE id = ?2",
+                rusqlite::params![json!({"unique": true}).to_string(), f0],
+            )
+            .unwrap();
+        let mk = |v: &str| -> serde_json::Map<String, Json> { [(f0.clone(), json!(v))].into_iter().collect() };
+        assert!(insert_row(&b, &s.tables[0].id, mk("Ana")).is_ok());
+        assert!(insert_row(&b, &s.tables[0].id, mk("Ana")).is_err()); // duplicado
+        assert!(insert_row(&b, &s.tables[0].id, mk("Bia")).is_ok());
+        // vazio nunca colide
+        assert!(insert_row(&b, &s.tables[0].id, mk("")).is_ok());
+        assert!(insert_row(&b, &s.tables[0].id, mk("")).is_ok());
+    }
+
+    #[test]
+    fn constraint_regex_e_faixa_numerica() {
+        let b = memory_base();
+        let s = read_schema(&b.conn, &b.path).unwrap();
+        let tid = s.tables[0].id.clone();
+        // campo número com min/max
+        let num = new_id();
+        b.conn
+            .execute(
+                "INSERT INTO _taylor_fields(id, table_id, name, type, options, pos) VALUES (?1,?2,'Nota','number',?3,5)",
+                rusqlite::params![num, tid, json!({"min": 0.0, "max": 10.0}).to_string()],
+            )
+            .unwrap();
+        b.conn.execute(&format!("ALTER TABLE \"t_{}\" ADD COLUMN \"c_{}\"", tid, num), []).unwrap();
+        let mk = |v: f64| -> serde_json::Map<String, Json> { [(num.clone(), json!(v))].into_iter().collect() };
+        assert!(insert_row(&b, &tid, mk(7.0)).is_ok());
+        assert!(insert_row(&b, &tid, mk(-1.0)).is_err());
+        assert!(insert_row(&b, &tid, mk(11.0)).is_err());
+    }
+
+    #[test]
+    fn agregacao_no_sql() {
+        let b = memory_base();
+        let s = read_schema(&b.conn, &b.path).unwrap();
+        let tid = s.tables[0].id.clone();
+        let num = new_id();
+        b.conn
+            .execute(
+                "INSERT INTO _taylor_fields(id, table_id, name, type, options, pos) VALUES (?1,?2,'Valor','number','{}',5)",
+                rusqlite::params![num, tid],
+            )
+            .unwrap();
+        b.conn.execute(&format!("ALTER TABLE \"t_{}\" ADD COLUMN \"c_{}\"", tid, num), []).unwrap();
+        for v in [10.0, 20.0, 30.0] {
+            insert_row(&b, &tid, [(num.clone(), json!(v))].into_iter().collect()).unwrap();
+        }
+        let fields = table_fields(&b.conn, &tid).unwrap();
+        let (w, p) = build_where(&[], &None, &fields).unwrap();
+        let sql = format!("SELECT SUM(CAST(\"c_{}\" AS REAL)), AVG(CAST(\"c_{}\" AS REAL)) FROM \"t_{}\"{}", num, num, tid, w);
+        let (sum, avg): (f64, f64) = b
+            .conn
+            .query_row(&sql, rusqlite::params_from_iter(p.iter()), |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!(sum, 60.0);
+        assert_eq!(avg, 20.0);
+    }
+
+    #[test]
+    fn escala_100k_query_e_agregacao() {
+        // insere 100k linhas e confere que consulta paginada + agregação no SQL
+        // respondem rápido (o teste passa; o tempo aparece com `cargo test -- --nocapture`)
+        let b = memory_base();
+        let s = read_schema(&b.conn, &b.path).unwrap();
+        let tid = s.tables[0].id.clone();
+        let name_f = s.tables[0].fields[0].id.clone();
+        let val = new_id();
+        b.conn
+            .execute(
+                "INSERT INTO _taylor_fields(id, table_id, name, type, options, pos) VALUES (?1,?2,'Valor','number','{}',5)",
+                rusqlite::params![val, tid],
+            )
+            .unwrap();
+        b.conn.execute(&format!("ALTER TABLE \"t_{}\" ADD COLUMN \"c_{}\"", tid, val), []).unwrap();
+
+        let t0 = std::time::Instant::now();
+        {
+            let tx = b.conn.unchecked_transaction().unwrap();
+            let sql = format!("INSERT INTO \"t_{}\" (\"c_{}\", \"c_{}\") VALUES (?1, ?2)", tid, name_f, val);
+            let mut stmt = tx.prepare(&sql).unwrap();
+            for i in 0..100_000i64 {
+                stmt.execute(rusqlite::params![format!("Item {}", i), (i % 1000) as f64]).unwrap();
+            }
+            drop(stmt);
+            tx.commit().unwrap();
+        }
+        let insert_ms = t0.elapsed().as_millis();
+
+        let fields = table_fields(&b.conn, &tid).unwrap();
+        // conta total
+        let total: i64 = b.conn.query_row(&format!("SELECT COUNT(*) FROM \"t_{}\"", tid), [], |r| r.get(0)).unwrap();
+        assert_eq!(total, 100_000);
+
+        // 1ª página (1000) com ordenação por número
+        let t1 = std::time::Instant::now();
+        let order = build_order(&[Sort { field_id: val.clone(), desc: true }], &fields).unwrap();
+        let sql = format!("SELECT {} FROM \"t_{}\"{} LIMIT 1000", select_cols(&fields), tid, order);
+        let page: Vec<Json> =
+            b.conn.prepare(&sql).unwrap().query_map([], |r| row_to_json(&fields, r)).unwrap().collect::<Result<_, _>>().unwrap();
+        assert_eq!(page.len(), 1000);
+        let page_ms = t1.elapsed().as_millis();
+
+        // agregação (soma/média) sobre tudo, no SQL
+        let t2 = std::time::Instant::now();
+        let (sum, avg): (f64, f64) = b
+            .conn
+            .query_row(
+                &format!("SELECT SUM(CAST(\"c_{}\" AS REAL)), AVG(CAST(\"c_{}\" AS REAL)) FROM \"t_{}\"", val, val, tid),
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let agg_ms = t2.elapsed().as_millis();
+        // 0..999 repetido 100x → média 499.5
+        assert!((avg - 499.5).abs() < 0.01);
+        assert!(sum > 0.0);
+
+        println!(
+            "100k: insert {}ms, página {}ms, agregação {}ms",
+            insert_ms, page_ms, agg_ms
+        );
+        // sanidade de performance: página e agregação bem abaixo de 1s
+        assert!(page_ms < 2000, "página lenta: {}ms", page_ms);
+        assert!(agg_ms < 2000, "agregação lenta: {}ms", agg_ms);
+    }
+
+    #[test]
+    fn login_argon2_roundtrip() {
+        let b = memory_base();
+        let (salt, hash) = hash_password(&b.conn, "segredo123").unwrap();
+        let uid = new_id();
+        b.conn
+            .execute(
+                "INSERT INTO _taylor_users(id, name, role, salt, hash) VALUES (?1,'admin','admin',?2,?3)",
+                rusqlite::params![uid, salt, hash],
+            )
+            .unwrap();
+        // confere via a mesma derivação usada em verify_login
+        use argon2::Argon2;
+        let mut out = [0u8; 32];
+        Argon2::default()
+            .hash_password_into("segredo123".as_bytes(), &hex_to_bytes(&salt), &mut out)
+            .unwrap();
+        assert_eq!(hex_of(&out), hash);
+        let mut wrong = [0u8; 32];
+        Argon2::default()
+            .hash_password_into("errada".as_bytes(), &hex_to_bytes(&salt), &mut wrong)
+            .unwrap();
+        assert_ne!(hex_of(&wrong), hash);
     }
 
     #[test]

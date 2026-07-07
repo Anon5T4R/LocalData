@@ -6,14 +6,28 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { openPath } from "@tauri-apps/plugin-opener";
 import { inTauri } from "../lib/backend";
 import { backupsDir } from "../lib/extensions";
+import { useRemote } from "../lib/remote";
 import { backupKeep, dropRecent, readRecents, setBackupKeep, useStore } from "../state/store";
 
 export function StartScreen() {
   const store = useStore();
+  const remote = useRemote();
   const [recents, setRecents] = useState(readRecents());
   const [keep, setKeep] = useState(backupKeep());
   const [customKeep, setCustomKeep] = useState(![0, 10, 50].includes(backupKeep()));
+  const [showConnect, setShowConnect] = useState(false);
+  const [srvUrl, setSrvUrl] = useState(localStorage.getItem("localdata.remote.url") ?? "");
+  const [srvUser, setSrvUser] = useState("");
+  const [srvPass, setSrvPass] = useState("");
   const tauri = inTauri();
+
+  const connect = async () => {
+    const ok = await remote.connect(srvUrl, srvUser, srvPass);
+    if (ok) {
+      setSrvPass("");
+      await store.openRemoteBase();
+    }
+  };
 
   const applyKeep = (n: number) => {
     setKeep(n);
@@ -66,7 +80,46 @@ export function StartScreen() {
           <button className="btn big" disabled={!tauri} onClick={() => void openFile()}>
             Abrir base…
           </button>
+          <button className="btn big" disabled={!tauri} onClick={() => setShowConnect(!showConnect)}>
+            🌐 Conectar a um servidor
+          </button>
         </div>
+
+        {showConnect && (
+          <div className="connect-box">
+            <div className="form-label">Servidor (endereço e porta)</div>
+            <input
+              className="input input-sm"
+              placeholder="192.168.0.10:8787"
+              value={srvUrl}
+              onChange={(e) => setSrvUrl(e.target.value)}
+            />
+            <div className="pop-row">
+              <input
+                className="input input-sm"
+                placeholder="Usuário"
+                value={srvUser}
+                onChange={(e) => setSrvUser(e.target.value)}
+              />
+              <input
+                className="input input-sm"
+                type="password"
+                placeholder="Senha"
+                value={srvPass}
+                onChange={(e) => setSrvPass(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void connect()}
+              />
+            </div>
+            {remote.error && <div className="ai-err">{remote.error}</div>}
+            <button
+              className="btn btn-sm primary"
+              disabled={remote.connecting || !srvUrl.trim() || !srvUser.trim()}
+              onClick={() => void connect()}
+            >
+              {remote.connecting ? "Conectando…" : "Conectar"}
+            </button>
+          </div>
+        )}
         {recents.length > 0 && (
           <div className="start-recents">
             <div className="form-label">Recentes</div>

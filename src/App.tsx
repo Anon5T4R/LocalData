@@ -14,6 +14,7 @@ import { FormView } from "./components/FormView";
 import { RecordModal } from "./components/RecordModal";
 import { AiPanel } from "./components/AiPanel";
 import { useExtensions } from "./lib/extensions";
+import { isRemote } from "./lib/remote";
 import "./App.css";
 
 const THEME_KEY = "localdata.theme";
@@ -32,6 +33,14 @@ export default function App() {
   useEffect(() => {
     void useExtensions.getState().reload();
   }, []);
+
+  // polling de mudanças quando conectado a um servidor remoto (multiusuário):
+  // vê edições de colegas em ~2s sem recarregar a mão.
+  useEffect(() => {
+    if (!store.schema || !isRemote()) return;
+    const t = setInterval(() => void useStore.getState().poll(), 2000);
+    return () => clearInterval(t);
+  }, [store.schema]);
 
   // undo/redo globais (Ctrl+Z / Ctrl+Y ou Ctrl+Shift+Z) — fora de inputs
   useEffect(() => {

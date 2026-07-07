@@ -8,6 +8,10 @@ import { FIELD_TYPE_ICON, isComputed, opsForType } from "../lib/types";
 import { useOutsideClick } from "./cells";
 import { exportTable, importFile } from "../lib/importer";
 import { GROUPABLE_TYPES } from "./GridView";
+import { ImportModal } from "./ImportModal";
+import { ReportModal } from "./ReportModal";
+import { AutomationsPanel } from "./AutomationsPanel";
+import { isRemote } from "../lib/remote";
 
 type Pop = "filters" | "sorts" | "fields" | "group" | "io" | null;
 
@@ -16,6 +20,9 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
   const table = activeTable(store);
   const view = activeView(store);
   const [pop, setPop] = useState<Pop>(null);
+  const [upsertOpen, setUpsertOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [autoOpen, setAutoOpen] = useState(false);
   const popRef = useRef<HTMLDivElement>(null);
   useOutsideClick(popRef, () => setPop(null));
 
@@ -242,6 +249,15 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
               className="menu-item"
               onClick={() => {
                 setPop(null);
+                setUpsertOpen(true);
+              }}
+            >
+              🔄 Importar/atualizar (esta tabela)
+            </button>
+            <button
+              className="menu-item"
+              onClick={() => {
+                setPop(null);
                 void exportTable(table, store.rows, "xlsx");
               }}
             >
@@ -255,6 +271,15 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
               }}
             >
               📤 Exportar CSV
+            </button>
+            <button
+              className="menu-item"
+              onClick={() => {
+                setPop(null);
+                setReportOpen(true);
+              }}
+            >
+              🖨 Relatório / imprimir (PDF)
             </button>
           </div>
         )}
@@ -288,9 +313,17 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
         value={store.search}
         onChange={(e) => store.setSearch(e.target.value)}
       />
+      {!isRemote() && (
+        <button className="btn" title="Automações desta tabela" onClick={() => setAutoOpen(true)}>
+          ⚡
+        </button>
+      )}
       <button className="btn ai-btn" onClick={onToggleAi}>
         ✦ IA
       </button>
+      {upsertOpen && <ImportModal onClose={() => setUpsertOpen(false)} />}
+      {reportOpen && <ReportModal onClose={() => setReportOpen(false)} />}
+      {autoOpen && <AutomationsPanel onClose={() => setAutoOpen(false)} />}
     </div>
   );
 }

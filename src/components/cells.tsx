@@ -348,7 +348,7 @@ export function CellDisplay({
       return <span className="cell-lookup">{texts.join(", ")}</span>;
     }
     case "rating": {
-      const max = field.options.max ?? 5;
+      const max = field.options.ratingMax ?? 5;
       const n = typeof value === "number" ? value : 0;
       return <RatingStars value={n} max={max} onRate={onRate} />;
     }
@@ -517,7 +517,7 @@ export function CellEditor({
     case "number":
       return <TextEditor value={value} commit={(v) => commit(parseNum(v))} cancel={cancel} autoFocus={autoFocus} numeric />;
     case "rating": {
-      const max = field.options.max ?? 5;
+      const max = field.options.ratingMax ?? 5;
       const n = typeof value === "number" ? value : 0;
       return (
         <span className="cell-rating-edit">

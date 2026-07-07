@@ -14,6 +14,8 @@
 
 import { create } from "zustand";
 import * as api from "../lib/backend";
+import { isRemote, useRemote } from "../lib/remote";
+import { parseAutomation, runAutomations, type Automation } from "../lib/automations";
 import type {
   BaseSchema,
   CellValue,
@@ -31,7 +33,7 @@ import { isComputed } from "../lib/types";
 
 const RECENTS_KEY = "localdata.recents";
 const BACKUP_KEY = "localdata.backupKeep";
-const PAGE_SIZE = 500;
+const PAGE_SIZE = 1000;
 const UNDO_CAP = 100;
 
 /** Quantas cópias de backup manter por base (0 desliga; default 10). */
@@ -82,11 +84,21 @@ interface DataState {
   undoStack: UndoAction[];
   redoStack: UndoAction[];
 
+  /** seq da última mudança que já refletimos (polling remoto/servidor). */
+  lastSeq: number;
+  /** automações da base (todas as tabelas), carregadas ao abrir. */
+  automations: Automation[];
+  reloadAutomations(): Promise<void>;
+
   // --- base ---
   createBase(path: string): Promise<void>;
   openBase(path: string): Promise<void>;
+  /** Abre a base servida por um host remoto já conectado (remote.ts). */
+  openRemoteBase(): Promise<void>;
   closeBase(): Promise<void>;
   refreshSchema(): Promise<void>;
+  /** Puxa mudanças do backend e recarrega o que mudou (chamado pelo polling). */
+  poll(): Promise<void>;
 
   // --- navegação ---
   setActiveTable(id: string): void;
@@ -183,6 +195,29 @@ export const useStore = create<DataState>((set, get) => {
     set((s) => ({ undoStack: [...s.undoStack.slice(-UNDO_CAP + 1), action], redoStack: [] }));
   }
 
+  /**
+   * Dispara as automações da tabela ativa pros registros afetados. Um nível:
+   * as ações set_field são gravadas SEM re-disparar automações (evita laços).
+   */
+  async function fireAutomations(event: "created" | "updated", ids: number[]) {
+    const st = get();
+    const table = activeTable(st);
+    if (!table || !st.automations.length || !ids.length) return;
+    const idset = new Set(ids);
+    // usa o estado recém-carregado das linhas afetadas
+    const affected = st.rows.filter((r) => idset.has(r.id));
+    if (!affected.length) return;
+    try {
+      const updates = await runAutomations(st.automations, table, event, affected);
+      if (updates.length) {
+        await api.recordsUpdate(table.id, updates); // gravação silenciosa, sem cascata
+        await get().refreshRows();
+      }
+    } catch (e) {
+      set({ error: msg(e) });
+    }
+  }
+
   async function reloadSchemaKeepingActive() {
     const schema = await api.baseSchema();
     const st = get();
@@ -230,6 +265,17 @@ export const useStore = create<DataState>((set, get) => {
     openRecordId: null,
     undoStack: [],
     redoStack: [],
+    lastSeq: 0,
+    automations: [],
+
+    async reloadAutomations() {
+      try {
+        const list = await api.automationsList();
+        set({ automations: list.map(parseAutomation) });
+      } catch {
+        set({ automations: [] });
+      }
+    },
 
     async createBase(path) {
       await guard(async () => {
@@ -261,21 +307,49 @@ export const useStore = create<DataState>((set, get) => {
           undoStack: [],
           redoStack: [],
         });
+        await get().reloadAutomations();
+        await get().refreshRows();
+      });
+    },
+
+    async openRemoteBase() {
+      await guard(async () => {
+        const schema = await api.baseSchema();
+        const t = firstTable(schema);
+        set({
+          schema,
+          activeTableId: t?.id ?? null,
+          activeViewId: t?.views[0]?.id ?? null,
+          search: "",
+          undoStack: [],
+          redoStack: [],
+          lastSeq: 0,
+        });
+        await get().reloadAutomations();
         await get().refreshRows();
       });
     },
 
     async closeBase() {
       fetchSeq++;
-      try {
-        await api.attachmentsGc();
-      } catch {
-        /* melhor esforço */
-      }
-      try {
-        await api.baseClose();
-      } catch {
-        /* já fechada */
+      const remote = isRemote();
+      if (remote) {
+        try {
+          await useRemote.getState().disconnect();
+        } catch {
+          /* melhor esforço */
+        }
+      } else {
+        try {
+          await api.attachmentsGc();
+        } catch {
+          /* melhor esforço */
+        }
+        try {
+          await api.baseClose();
+        } catch {
+          /* já fechada */
+        }
       }
       set({
         schema: null,
@@ -286,11 +360,32 @@ export const useStore = create<DataState>((set, get) => {
         search: "",
         undoStack: [],
         redoStack: [],
+        lastSeq: 0,
       });
     },
 
     async refreshSchema() {
       await guard(reloadSchemaKeepingActive);
+    },
+
+    async poll() {
+      const st = get();
+      if (!st.schema) return;
+      try {
+        const ch = await api.changesSince(st.lastSeq);
+        if (ch.seq === st.lastSeq) return;
+        set({ lastSeq: ch.seq });
+        if (ch.schemaChanged) {
+          await reloadSchemaKeepingActive();
+          await get().refreshRows();
+        } else if (st.activeTableId && ch.tables.includes(st.activeTableId)) {
+          // outra pessoa mexeu na tabela ativa: recarrega em silêncio
+          // (rótulos de relação podem ficar levemente defasados até reabrir)
+          await get().refreshRows();
+        }
+      } catch {
+        /* rede instável: tenta de novo no próximo tick */
+      }
     },
 
     setActiveTable(id) {
@@ -501,6 +596,7 @@ export const useStore = create<DataState>((set, get) => {
         pushUndo({ type: "create", tableId, ids: [id], rows: [clean] });
       }
       await get().refreshRows();
+      if (id != null) await fireAutomations("created", [id]);
       return id;
     },
 
@@ -544,7 +640,8 @@ export const useStore = create<DataState>((set, get) => {
           });
         }
         // filtros/ordenação podem ter mudado o resultado — recarrega em silêncio
-        void get().refreshRows();
+        await get().refreshRows();
+        await fireAutomations("updated", [recordId]);
       } catch (e) {
         set({ error: msg(e) });
         void get().refreshRows();
@@ -575,7 +672,8 @@ export const useStore = create<DataState>((set, get) => {
         return true;
       });
       if (ok) pushUndo({ type: "update", tableId, before, after: clean });
-      void get().refreshRows();
+      await get().refreshRows();
+      if (ok) await fireAutomations("updated", clean.map((u) => u.id));
     },
 
     async createRecordsBulk(rows) {
@@ -587,6 +685,7 @@ export const useStore = create<DataState>((set, get) => {
       const ids = await guard(() => api.recordsInsertBulk(tableId, clean));
       if (ids) pushUndo({ type: "create", tableId, ids, rows: clean });
       await get().refreshRows();
+      if (ids) await fireAutomations("created", ids);
       return ids;
     },
 

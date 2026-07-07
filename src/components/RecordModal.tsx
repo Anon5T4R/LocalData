@@ -7,6 +7,7 @@ import { activeTable, useStore } from "../state/store";
 import type { CellValue, Field, RecordRow } from "../lib/types";
 import { FIELD_TYPE_ICON, FIELD_TYPE_LABEL, isComputed } from "../lib/types";
 import { CellDisplay, CellEditor, invalidateLinkLabels } from "./cells";
+import { AuditList } from "./AuditPanel";
 
 export function RecordModal() {
   const store = useStore();
@@ -14,6 +15,7 @@ export function RecordModal() {
   const openId = store.openRecordId;
   const [draft, setDraft] = useState<Record<string, CellValue>>({});
   const [editingField, setEditingField] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   const isNew = openId === "new";
   const row = !isNew && openId != null ? store.rows.find((r) => r.id === openId) : undefined;
@@ -96,6 +98,12 @@ export function RecordModal() {
             </div>
           ))}
         </div>
+        {!isNew && showHistory && (
+          <div className="record-history">
+            <div className="form-label">Histórico deste registro</div>
+            <AuditList tableId={table.id} recordId={row!.id} />
+          </div>
+        )}
         <div className="modal-actions">
           {!isNew && (
             <button
@@ -108,6 +116,11 @@ export function RecordModal() {
               }}
             >
               Excluir
+            </button>
+          )}
+          {!isNew && (
+            <button className="btn" onClick={() => setShowHistory(!showHistory)}>
+              🕘 {showHistory ? "Ocultar" : "Histórico"}
             </button>
           )}
           <span style={{ flex: 1 }} />

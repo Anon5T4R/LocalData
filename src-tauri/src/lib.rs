@@ -1,5 +1,6 @@
 mod db;
 mod llm;
+mod server;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -114,7 +115,9 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(db::Db::default())
+        .manage(server::ServerState::default())
         .manage(Mutex::new(llm::LlmState::default()))
         .invoke_handler(tauri::generate_handler![
             get_startup_file,
@@ -128,6 +131,20 @@ pub fn run() {
             db::base_open,
             db::base_close,
             db::base_schema,
+            db::changes_since,
+            db::records_aggregate,
+            db::audit_query,
+            db::users_list,
+            db::user_save,
+            db::user_delete,
+            db::user_set_perm,
+            db::automations_list,
+            db::automation_save,
+            db::automation_delete,
+            db::attachment_upload,
+            server::server_start,
+            server::server_stop,
+            server::server_status,
             db::table_create,
             db::table_rename,
             db::table_delete,

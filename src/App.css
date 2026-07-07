@@ -1535,6 +1535,258 @@ body {
   font-size: 12px;
 }
 
+/* ---------- servidor / usuários / conexão remota ---------- */
+
+.server-panel,
+.audit-panel,
+.import-modal,
+.automations-panel {
+  width: 560px;
+  max-width: 92vw;
+  max-height: 86vh;
+  overflow: auto;
+}
+.server-tabs,
+.server-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.tab-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 12px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+}
+.tab-btn.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.serve-info {
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--bg3);
+  border-radius: 8px;
+}
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.users-table th,
+.users-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.users-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.user-editor,
+.automation-editor {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--bg3);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.perm-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.perm-table {
+  flex: 1;
+  font-size: 13px;
+}
+.remote-badge {
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 3px 8px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.connect-box {
+  margin-top: 14px;
+  padding: 12px;
+  background: var(--bg3);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+
+/* ---------- auditoria ---------- */
+
+.audit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+.audit-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.audit-actor {
+  font-weight: 600;
+}
+.audit-ts {
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.audit-empty {
+  padding: 12px 6px;
+  font-size: 12px;
+}
+.record-history {
+  margin: 10px 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------- import upsert / automações ---------- */
+
+.import-summary,
+.import-result {
+  margin: 8px 0;
+  font-size: 13px;
+}
+.import-result {
+  color: #16a34a;
+}
+.automation-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.automation-name {
+  font-weight: 600;
+}
+.automation-desc {
+  flex: 1;
+  font-size: 12px;
+}
+.req-mark {
+  color: var(--danger);
+  font-weight: 700;
+}
+.constraints-box {
+  margin: 8px 0;
+  padding: 10px;
+  background: var(--bg3);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ---------- relatório imprimível ---------- */
+
+.report-modal {
+  width: 820px;
+  max-width: 94vw;
+  max-height: 88vh;
+  overflow: auto;
+}
+.report-sheet {
+  background: #fff;
+  color: #111;
+  padding: 24px;
+  border-radius: 6px;
+  margin-top: 10px;
+}
+.report-head h1 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+.report-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: #555;
+  border-bottom: 2px solid #111;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+}
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  color: #111;
+}
+.report-table th,
+.report-table td {
+  border: 1px solid #ccc;
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+.report-table thead th {
+  background: #f0f0f0;
+}
+.report-table tfoot td {
+  font-weight: 700;
+  background: #f6f6f6;
+}
+.report-group td {
+  background: #e9e9ef;
+  font-weight: 700;
+}
+.report-group-count {
+  font-weight: 400;
+  color: #666;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .modal-backdrop {
+    position: static;
+    background: none;
+  }
+  .report-modal {
+    box-shadow: none;
+    max-height: none;
+    width: auto;
+    overflow: visible;
+  }
+  .no-print {
+    display: none !important;
+  }
+  #report-sheet,
+  #report-sheet * {
+    visibility: visible;
+  }
+  #report-sheet {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+  }
+}
+
 /* ---------- banner de erro ---------- */
 
 .error-banner {

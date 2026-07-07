@@ -21,7 +21,17 @@ export function FormView() {
     order ? (order.map((id) => table.fields.find((f) => f.id === id)).filter(Boolean) as typeof table.fields) : table.fields
   ).filter((f) => !isComputed(f.type));
 
+  const missingRequired = fields.filter((f) => {
+    if (!f.options.required) return false;
+    const v = draft[f.id];
+    return v == null || v === "" || (Array.isArray(v) && v.length === 0);
+  });
+
   const submit = async () => {
+    if (missingRequired.length) {
+      store.setError(`Preencha os campos obrigatórios: ${missingRequired.map((f) => f.name).join(", ")}`);
+      return;
+    }
     const id = await store.addRecord(draft);
     if (id != null) {
       setDraft({});
@@ -38,7 +48,10 @@ export function FormView() {
         {view.config.formDescription && <p className="muted">{view.config.formDescription}</p>}
         {fields.map((f) => (
           <div key={f.id} className="record-field">
-            <div className="record-field-label">{f.name}</div>
+            <div className="record-field-label">
+              {f.name}
+              {f.options.required && <span className="req-mark" title="Obrigatório"> *</span>}
+            </div>
             <div
               className="record-field-value"
               onClick={() => f.type !== "checkbox" && f.type !== "rating" && editing !== f.id && setEditing(f.id)}

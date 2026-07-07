@@ -40,12 +40,19 @@ export interface FieldOptions {
   precision?: number; // number
   format?: NumberFormat; // number: exibição
   includeTime?: boolean; // date
-  max?: number; // rating: estrelas (default 5)
+  ratingMax?: number; // rating: nº de estrelas (default 5)
   linkFieldId?: string; // lookup/rollup: campo de relação desta tabela
   targetFieldId?: string; // lookup/rollup: campo da tabela relacionada
   agg?: RollupAgg; // rollup
   extType?: string; // custom: id do tipo registrado por uma extensão
   description?: string; // qualquer tipo: tooltip no cabeçalho
+  // --- constraints (validadas no Rust, dentro da transação) ---
+  unique?: boolean; // valor não pode repetir na tabela
+  required?: boolean; // obrigatório no formulário (nível de UI)
+  regex?: string; // tipos texto: precisa casar
+  min?: number | string; // constraint: número (num) ou data (ISO)
+  max?: number | string; // constraint: número (num) ou data (ISO)
+  onDelete?: "restrict" | "unlink"; // link: impedir exclusão do alvo, ou desvincular (padrão)
 }
 
 export interface Field {

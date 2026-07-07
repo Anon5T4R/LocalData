@@ -1,22 +1,30 @@
-// Barra superior: nome da base, abas de tabela, extensões, tema e fechar base.
+// Barra superior: nome da base, abas de tabela, extensões, servidor, histórico,
+// tema e fechar base.
 
 import { useRef, useState } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { activeTable, useStore } from "../state/store";
 import { extensionsDir, useExtensions } from "../lib/extensions";
 import { inTauri } from "../lib/backend";
+import { isRemote, useRemote } from "../lib/remote";
 import { useOutsideClick } from "./cells";
+import { ServerPanel } from "./ServerPanel";
+import { AuditPanel } from "./AuditPanel";
 
 export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme: () => void }) {
   const store = useStore();
   const ext = useExtensions();
+  const remote = useRemote();
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [extMenu, setExtMenu] = useState(false);
+  const [serverOpen, setServerOpen] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
   const [dragTab, setDragTab] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const extRef = useRef<HTMLDivElement>(null);
   useOutsideClick(menuRef, () => setMenuFor(null));
   useOutsideClick(extRef, () => setExtMenu(false));
+  const remoteAdmin = !isRemote() || remote.session?.role === "admin";
 
   const openExtensionsFolder = async () => {
     try {
@@ -181,12 +189,29 @@ export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme:
           )}
         </div>
       )}
+      {isRemote() && (
+        <span className="remote-badge" title={`Conectado a ${remote.session?.url} como ${remote.session?.name}`}>
+          🌐 {remote.session?.name} ({remote.session?.role})
+        </span>
+      )}
+      {inTauri() && remoteAdmin && (
+        <button className="icon-btn" title="Histórico de alterações" onClick={() => setAuditOpen(true)}>
+          🕘
+        </button>
+      )}
+      {inTauri() && !isRemote() && (
+        <button className="icon-btn" title="Servidor multiusuário e usuários" onClick={() => setServerOpen(true)}>
+          🌐
+        </button>
+      )}
       <button className="icon-btn" title="Alternar tema" onClick={onToggleTheme}>
         {theme === "dark" ? "☀" : "🌙"}
       </button>
       <button className="btn" onClick={() => void store.closeBase()}>
-        Fechar base
+        {isRemote() ? "Desconectar" : "Fechar base"}
       </button>
+      {serverOpen && <ServerPanel onClose={() => setServerOpen(false)} />}
+      {auditOpen && <AuditPanel onClose={() => setAuditOpen(false)} />}
     </header>
   );
 }

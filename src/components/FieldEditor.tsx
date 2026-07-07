@@ -33,12 +33,18 @@ export function FieldEditor({
   const [precision, setPrecision] = useState(field?.options.precision?.toString() ?? "");
   const [format, setFormat] = useState<NumberFormat>(field?.options.format ?? "decimal");
   const [includeTime, setIncludeTime] = useState(field?.options.includeTime ?? false);
-  const [ratingMax, setRatingMax] = useState(field?.options.max?.toString() ?? "5");
+  const [ratingMax, setRatingMax] = useState(field?.options.ratingMax?.toString() ?? "5");
   const [linkFieldId, setLinkFieldId] = useState(field?.options.linkFieldId ?? "");
   const [targetFieldId, setTargetFieldId] = useState(field?.options.targetFieldId ?? "");
   const [agg, setAgg] = useState<RollupAgg>(field?.options.agg ?? "count");
   const [extTypeId, setExtTypeId] = useState(field?.options.extType ?? "");
   const [description, setDescription] = useState(field?.options.description ?? "");
+  const [unique, setUnique] = useState(field?.options.unique ?? false);
+  const [required, setRequired] = useState(field?.options.required ?? false);
+  const [regex, setRegex] = useState(field?.options.regex ?? "");
+  const [cmin, setCmin] = useState(field?.options.min != null ? String(field.options.min) : "");
+  const [cmax, setCmax] = useState(field?.options.max != null ? String(field.options.max) : "");
+  const [onDelete, setOnDelete] = useState<"restrict" | "unlink">(field?.options.onDelete ?? "unlink");
   const [busy, setBusy] = useState(false);
   const extTypes = useExtensions((s) => s.types);
 
@@ -64,16 +70,38 @@ export function FieldEditor({
       if (format !== "decimal") o.format = format;
     }
     if (type === "date") o.includeTime = includeTime;
-    if (type === "rating") o.max = Math.max(1, Math.min(10, parseInt(ratingMax, 10) || 5));
+    if (type === "rating") o.ratingMax = Math.max(1, Math.min(10, parseInt(ratingMax, 10) || 5));
     if (type === "lookup" || type === "rollup") {
       o.linkFieldId = viaField?.id ?? "";
       o.targetFieldId = targetFields.some((f) => f.id === targetFieldId) ? targetFieldId : targetFields[0]?.id ?? "";
       if (type === "rollup") o.agg = agg;
     }
     if (type === "custom") o.extType = extTypeId;
+    // --- constraints ---
+    const numberLike = type === "number" || type === "rating";
+    const textLike = ["text", "long_text", "url", "email", "phone", "custom"].includes(type);
+    if (unique && !isComputed(type) && type !== "checkbox" && type !== "attachment" && type !== "multi_select") {
+      o.unique = true;
+    }
+    if (required && !isComputed(type)) o.required = true;
+    if (textLike && regex.trim()) o.regex = regex.trim();
+    if (numberLike) {
+      if (cmin !== "") o.min = parseFloat(cmin.replace(",", "."));
+      if (cmax !== "" && type === "number") o.max = parseFloat(cmax.replace(",", "."));
+    }
+    if (type === "date") {
+      if (cmin) o.min = cmin;
+      if (cmax) o.max = cmax;
+    }
+    if (type === "link") o.onDelete = onDelete;
     if (description.trim()) o.description = description.trim();
     return o;
   };
+
+  const numberLike = type === "number" || type === "rating";
+  const textLike = ["text", "long_text", "url", "email", "phone", "custom"].includes(type);
+  const canUnique = !isComputed(type) && !["checkbox", "attachment", "multi_select"].includes(type);
+  const canConstrain = !isComputed(type);
 
   const save = async () => {
     if (!name.trim()) return;
@@ -288,6 +316,64 @@ export function FieldEditor({
             <input type="checkbox" checked={includeTime} onChange={(e) => setIncludeTime(e.target.checked)} />
             Incluir hora
           </label>
+        )}
+
+        {type === "link" && (
+          <>
+            <label className="form-label">Ao excluir um registro relacionado</label>
+            <select className="input" value={onDelete} onChange={(e) => setOnDelete(e.target.value as "restrict" | "unlink")}>
+              <option value="unlink">Desvincular (remove a referência)</option>
+              <option value="restrict">Impedir a exclusão (integridade)</option>
+            </select>
+          </>
+        )}
+
+        {canConstrain && (
+          <div className="constraints-box">
+            <div className="form-label">Validação</div>
+            {canUnique && (
+              <label className="check-label">
+                <input type="checkbox" checked={unique} onChange={(e) => setUnique(e.target.checked)} />
+                Valor único (não pode repetir)
+              </label>
+            )}
+            <label className="check-label">
+              <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />
+              Obrigatório no formulário
+            </label>
+            {textLike && (
+              <>
+                <label className="form-label">Formato exigido (regex, opcional)</label>
+                <input
+                  className="input"
+                  value={regex}
+                  onChange={(e) => setRegex(e.target.value)}
+                  placeholder="ex.: ^[A-Z]{3}-\d{4}$"
+                />
+              </>
+            )}
+            {(numberLike || type === "date") && (
+              <div className="pop-row">
+                <label className="form-label">Mín</label>
+                <input
+                  className="input input-sm w80"
+                  type={type === "date" ? "date" : "text"}
+                  inputMode={numberLike ? "decimal" : undefined}
+                  value={cmin}
+                  onChange={(e) => setCmin(e.target.value)}
+                />
+                <label className="form-label">Máx</label>
+                <input
+                  className="input input-sm w80"
+                  type={type === "date" ? "date" : "text"}
+                  inputMode={numberLike ? "decimal" : undefined}
+                  value={cmax}
+                  onChange={(e) => setCmax(e.target.value)}
+                  disabled={type === "rating"}
+                />
+              </div>
+            )}
+          </div>
         )}
 
         <label className="form-label">Descrição (opcional, aparece como dica)</label>

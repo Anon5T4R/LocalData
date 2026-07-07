@@ -27,6 +27,17 @@ Parte da suíte Taylor (LocalOffice, LocalSheets, LocalSlides, LocalCode, Taylor
   registra tipos novos (validação, máscara, cor). Ver [Extensões](#extensões).
 - **Backup automático ao abrir** — cópia da base antes de cada abertura, com
   retenção configurável (10/50/N por base; 0 desliga). Ver [Backups](#backups).
+- **Modo servidor multiusuário (LAN)** — hospede a base pra equipe pela rede
+  local, com usuários, senhas e papéis (leitor/editor/admin) + permissão por
+  tabela. Ver [Multiusuário](#multiusuário).
+- **Auditoria** — trilha de quem mudou o quê e quando (por registro e geral).
+- **Integridade e validação** — relação com "impedir exclusão"/"desvincular";
+  campos únicos, obrigatórios, regex, mín/máx.
+- **Import com upsert** — reimporte uma planilha e atualize os registros por um
+  campo-chave, criando só os novos.
+- **Automações** — "quando X → notifique / defina campo".
+- **Relatórios imprimíveis** — exporte a view atual pra PDF (impressora do SO).
+- **Escala** — consultas e agregações no SQL; ~100k registros por tabela com folga.
 - **Import CSV/XLSX** com inferência de tipos (número, data, checkbox, select) e
   **export XLSX/CSV**.
 - **IA local (llama.cpp / GGUF)**: "cria uma tabela de clientes com os campos certos",
@@ -90,6 +101,26 @@ Ao abrir uma base, o app copia o arquivo pra pasta central de backups
 recentes **por base** (configurável na tela inicial: desligado/10/50/número
 livre). Restaurar = copiar o `.tbase` do backup de volta. A pasta abre pelo
 botão "📂 Backups" na tela inicial.
+
+## Multiusuário
+
+Pensado pra time de empresa média, sem nuvem: a base continua um arquivo local
+numa máquina, que passa a **servir** os dados pra rede.
+
+- **Servir (host):** abra a base, menu 🌐 → aba *Usuários* cadastre ao menos um
+  **admin** (usuário + senha, guardados na própria base com Argon2) → aba
+  *Servir* → escolha a porta e clique em *Começar a servir*. O app mostra o
+  endereço (ex.: `http://192.168.0.10:8787`). Mantenha o LocalData aberto.
+- **Conectar (cliente):** na tela inicial, *🌐 Conectar a um servidor*, informe
+  o endereço, usuário e senha. As edições aparecem pra todos em ~2s (polling).
+- **Papéis:** *leitor* (só vê) < *editor* (edita registros) < *admin* (estrutura
+  + usuários). Dá pra sobrepor por tabela: sem acesso / só leitura / edição.
+- **Como funciona:** um servidor HTTP local (tiny_http) atende os mesmos comandos
+  do app, tudo serializado no mesmo SQLite — **nunca há escrita concorrente no
+  arquivo**. O servidor injeta o autor em cada mudança (a auditoria não mente).
+
+> Escopo: rede local, um arquivo, um processo servidor. Não é um SaaS — é o seu
+> Access/Airtable rodando na máquina da sala ao lado.
 
 ## Formato do arquivo
 

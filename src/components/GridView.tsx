@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { activeTable, activeView, useStore, visibleFields } from "../state/store";
+import * as api from "../lib/backend";
 import type { CellValue, Field, RecordRow, AggKind } from "../lib/types";
 import { FIELD_TYPE_ICON, choiceColor, isComputed } from "../lib/types";
 import { CellDisplay, CellEditor, formatNumber, invalidateLinkLabels, plainCellText, useOutsideClick } from "./cells";
@@ -460,35 +461,41 @@ export function GridView() {
     void store.patchViewConfig({ aggs: nextAggs });
   };
 
-  const aggValue = (f: Field, kind: AggKind): string => {
-    if (kind === "filled") {
-      const n = rows.filter((r) => {
-        const v = r.cells[f.id];
-        return v != null && v !== "" && !(Array.isArray(v) && v.length === 0);
-      }).length;
-      return `Preench. ${n}`;
-    }
-    const nums = rows.map((r) => r.cells[f.id]).filter((v): v is number => typeof v === "number");
-    if (!nums.length) return "—";
-    let out: number;
-    switch (kind) {
-      case "sum":
-        out = nums.reduce((a, b) => a + b, 0);
-        break;
-      case "avg":
-        out = nums.reduce((a, b) => a + b, 0) / nums.length;
-        break;
-      case "min":
-        out = Math.min(...nums);
-        break;
-      default:
-        out = Math.max(...nums);
-    }
-    const label = { sum: "Soma", avg: "Média", min: "Mín", max: "Máx" }[kind];
-    return `${label} ${formatNumber(Math.round(out * 1e6) / 1e6, f.options)}`;
-  };
-
   const hasAggs = Object.keys(aggs).some((id) => fields.some((f) => f.id === id));
+
+  // Agregações no SQL: valem sobre a tabela INTEIRA (com os filtros/busca da
+  // view), não só sobre as linhas carregadas — escala pra centenas de milhares.
+  const [aggData, setAggData] = useState<Record<string, number | null>>({});
+  const aggKey = JSON.stringify(aggs);
+  useEffect(() => {
+    if (!hasAggs || !table) {
+      setAggData({});
+      return;
+    }
+    const specs = Object.entries(aggs)
+      .filter(([id]) => fields.some((f) => f.id === id))
+      .map(([fieldId, kind]) => ({ fieldId, kind: kind as string }));
+    let dead = false;
+    api
+      .recordsAggregate(table.id, specs, {
+        filters: view.config.filters ?? [],
+        search: store.search || undefined,
+      })
+      .then((d) => !dead && setAggData(d))
+      .catch(() => {});
+    return () => {
+      dead = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aggKey, table?.id, store.search, JSON.stringify(view.config.filters ?? []), store.total]);
+
+  const aggValue = (f: Field, kind: AggKind): string => {
+    const raw = aggData[`${f.id}:${kind}`];
+    if (kind === "filled") return `Preench. ${raw ?? 0}`;
+    if (raw == null) return "—";
+    const label = { sum: "Soma", avg: "Média", min: "Mín", max: "Máx" }[kind];
+    return `${label} ${formatNumber(Math.round(raw * 1e6) / 1e6, f.options)}`;
+  };
   const rect = selRect();
 
   const rowColor = (r: RecordRow): string | undefined => {
