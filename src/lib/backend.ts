@@ -64,7 +64,9 @@ export const recordsUpdate = (tableId: string, updates: { id: number; cells: Rec
   invoke<void>("records_update", { tableId, updates });
 export const recordsDelete = (tableId: string, ids: number[]) => invoke<void>("records_delete", { tableId, ids });
 export const recordsInsertBulk = (tableId: string, rows: Record<string, CellValue>[]) =>
-  invoke<number>("records_insert_bulk", { tableId, rows });
+  invoke<number[]>("records_insert_bulk", { tableId, rows });
+export const recordsRestore = (tableId: string, rows: { id: number; cells: Record<string, CellValue> }[]) =>
+  invoke<void>("records_restore", { tableId, rows });
 
 // --- views ---
 export const viewCreate = (tableId: string, name: string, kind: ViewKind, config: ViewConfig) =>

@@ -60,7 +60,7 @@ fn collect_gguf(dir: &Path, base: &Path, out: &mut Vec<ModelInfo>) {
 }
 
 /// List all .gguf models found (recursively) under `dir`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_models(dir: String) -> Result<Vec<ModelInfo>, String> {
     let base = PathBuf::from(&dir);
     if !base.exists() {
@@ -124,7 +124,7 @@ fn wait_for_port(port: u16, secs: u64) -> Result<(), String> {
 }
 
 /// Start (or restart) llama-server with the chosen model. Returns the port.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn start_llm(
     app: tauri::AppHandle,
     state: State<'_, Mutex<LlmState>>,
@@ -178,7 +178,7 @@ pub fn start_llm(
     Ok(port)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn stop_llm(state: State<'_, Mutex<LlmState>>) -> Result<(), String> {
     let mut s = state.lock().map_err(|_| "estado da IA corrompido")?;
     if let Some(child) = s.child.as_mut() {
@@ -190,7 +190,7 @@ pub fn stop_llm(state: State<'_, Mutex<LlmState>>) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn llm_status(state: State<'_, Mutex<LlmState>>) -> LlmStatus {
     let mut s = state.lock().expect("estado da IA");
     let running = match s.child.as_mut() {

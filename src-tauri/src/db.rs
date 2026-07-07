@@ -622,7 +622,7 @@ fn open_connection(path: &PathBuf) -> Result<Connection, String> {
 // Comandos: base
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn base_create(state: State<'_, Db>, path: String) -> Result<BaseSchema, String> {
     let p = PathBuf::from(&path);
     if p.exists() {
@@ -637,7 +637,7 @@ pub fn base_create(state: State<'_, Db>, path: String) -> Result<BaseSchema, Str
     Ok(schema)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn base_open(state: State<'_, Db>, path: String) -> Result<BaseSchema, String> {
     let p = PathBuf::from(&path);
     if !p.is_file() {
@@ -670,14 +670,14 @@ pub fn base_open(state: State<'_, Db>, path: String) -> Result<BaseSchema, Strin
     Ok(schema)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn base_close(state: State<'_, Db>) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|_| "estado do banco corrompido")?;
     *guard = None;
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn base_schema(state: State<'_, Db>) -> Result<BaseSchema, String> {
     with_base(&state, |b| read_schema(&b.conn, &b.path))
 }
@@ -686,7 +686,7 @@ pub fn base_schema(state: State<'_, Db>) -> Result<BaseSchema, String> {
 // Comandos: tabelas
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn table_create(state: State<'_, Db>, name: String) -> Result<String, String> {
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -700,7 +700,7 @@ pub fn table_create(state: State<'_, Db>, name: String) -> Result<String, String
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn table_rename(state: State<'_, Db>, table_id: String, name: String) -> Result<(), String> {
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -718,7 +718,7 @@ pub fn table_rename(state: State<'_, Db>, table_id: String, name: String) -> Res
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn table_delete(state: State<'_, Db>, table_id: String) -> Result<(), String> {
     with_base(&state, |b| {
         table_exists(&b.conn, &table_id)?;
@@ -732,7 +732,7 @@ pub fn table_delete(state: State<'_, Db>, table_id: String) -> Result<(), String
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn tables_reorder(state: State<'_, Db>, ids: Vec<String>) -> Result<(), String> {
     with_base(&state, |b| {
         let tx = b.conn.transaction().map_err(db_err)?;
@@ -749,7 +749,7 @@ pub fn tables_reorder(state: State<'_, Db>, ids: Vec<String>) -> Result<(), Stri
 // Comandos: campos
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn field_create(
     state: State<'_, Db>,
     table_id: String,
@@ -790,7 +790,7 @@ pub fn field_create(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn field_update(
     state: State<'_, Db>,
     field_id: String,
@@ -823,7 +823,7 @@ pub fn field_update(
 /// Muda o tipo de um campo convertendo os valores existentes (melhor esforço).
 /// Como o SQLite não impõe tipo por coluna, não há rebuild de tabela: os dados
 /// são convertidos linha a linha dentro de uma transação.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn field_change_type(
     state: State<'_, Db>,
     field_id: String,
@@ -960,7 +960,7 @@ fn convert_value(old_type: &str, new_type: &str, new_options: &Json, v: &Json) -
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn field_delete(state: State<'_, Db>, field_id: String) -> Result<(), String> {
     with_base(&state, |b| {
         let (table_id, ftype, _) = field_meta(&b.conn, &field_id)?;
@@ -982,7 +982,7 @@ pub fn field_delete(state: State<'_, Db>, field_id: String) -> Result<(), String
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fields_reorder(state: State<'_, Db>, table_id: String, ids: Vec<String>) -> Result<(), String> {
     with_base(&state, |b| {
         let tx = b.conn.transaction().map_err(db_err)?;
@@ -1033,7 +1033,7 @@ fn select_cols(fields: &[FieldMeta]) -> String {
     cols.join(", ")
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn records_query(
     state: State<'_, Db>,
     table_id: String,
@@ -1079,7 +1079,7 @@ pub fn records_query(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn records_by_ids(state: State<'_, Db>, table_id: String, ids: Vec<i64>) -> Result<Vec<Json>, String> {
     with_base(&state, |b| {
         table_exists(&b.conn, &table_id)?;
@@ -1129,7 +1129,7 @@ fn validated_cells(
     Ok((cols, vals))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn record_create(state: State<'_, Db>, table_id: String, cells: Json) -> Result<i64, String> {
     with_base(&state, |b| {
         table_exists(&b.conn, &table_id)?;
@@ -1160,7 +1160,7 @@ pub struct RecordUpdate {
     pub cells: Json,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn records_update(state: State<'_, Db>, table_id: String, updates: Vec<RecordUpdate>) -> Result<(), String> {
     with_base(&state, |b| {
         table_exists(&b.conn, &table_id)?;
@@ -1189,7 +1189,7 @@ pub fn records_update(state: State<'_, Db>, table_id: String, updates: Vec<Recor
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn records_delete(state: State<'_, Db>, table_id: String, ids: Vec<i64>) -> Result<(), String> {
     with_base(&state, |b| {
         table_exists(&b.conn, &table_id)?;
@@ -1207,13 +1207,15 @@ pub fn records_delete(state: State<'_, Db>, table_id: String, ids: Vec<i64>) -> 
     })
 }
 
-#[tauri::command]
-pub fn records_insert_bulk(state: State<'_, Db>, table_id: String, rows: Vec<Json>) -> Result<i64, String> {
+/// Insere em lote (uma transação) e devolve os ids criados, na ordem — o
+/// frontend precisa deles pro undo/redo e pra abrir o registro recém-criado.
+#[tauri::command(async)]
+pub fn records_insert_bulk(state: State<'_, Db>, table_id: String, rows: Vec<Json>) -> Result<Vec<i64>, String> {
     with_base(&state, |b| {
         table_exists(&b.conn, &table_id)?;
         let fields = table_fields(&b.conn, &table_id)?;
         let tx = b.conn.transaction().map_err(db_err)?;
-        let mut count = 0i64;
+        let mut ids = Vec::with_capacity(rows.len());
         for row in &rows {
             let map = row.as_object().cloned().unwrap_or_default();
             let (cols, vals) = validated_cells(&fields, &map)?;
@@ -1228,10 +1230,42 @@ pub fn records_insert_bulk(state: State<'_, Db>, table_id: String, rows: Vec<Jso
                 )
                 .map_err(db_err)?;
             }
-            count += 1;
+            ids.push(tx.last_insert_rowid());
         }
         tx.commit().map_err(db_err)?;
-        Ok(count)
+        Ok(ids)
+    })
+}
+
+/// Restaura registros excluídos COM os ids originais (undo de exclusão).
+/// Seguro porque a tabela usa AUTOINCREMENT: um id excluído nunca é reciclado,
+/// então re-inserir com id explícito não colide com registros novos. Assim as
+/// relações (arrays de ids em campos link) continuam apontando certo.
+#[tauri::command(async)]
+pub fn records_restore(state: State<'_, Db>, table_id: String, rows: Vec<Json>) -> Result<(), String> {
+    with_base(&state, |b| {
+        table_exists(&b.conn, &table_id)?;
+        let fields = table_fields(&b.conn, &table_id)?;
+        let tx = b.conn.transaction().map_err(db_err)?;
+        for row in &rows {
+            let id = row.get("id").and_then(|v| v.as_i64()).ok_or("restore sem id")?;
+            let map = row
+                .get("cells")
+                .and_then(|c| c.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let (mut cols, mut vals) = validated_cells(&fields, &map)?;
+            cols.insert(0, "id".into());
+            vals.insert(0, SqlValue::Integer(id));
+            let marks = vec!["?"; cols.len()].join(",");
+            tx.execute(
+                &format!("INSERT INTO \"t_{}\" ({}) VALUES ({})", table_id, cols.join(","), marks),
+                rusqlite::params_from_iter(vals.iter()),
+            )
+            .map_err(db_err)?;
+        }
+        tx.commit().map_err(db_err)?;
+        Ok(())
     })
 }
 
@@ -1239,7 +1273,7 @@ pub fn records_insert_bulk(state: State<'_, Db>, table_id: String, rows: Vec<Jso
 // Comandos: views
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn view_create(
     state: State<'_, Db>,
     table_id: String,
@@ -1272,7 +1306,7 @@ pub fn view_create(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn view_update(
     state: State<'_, Db>,
     view_id: String,
@@ -1297,7 +1331,7 @@ pub fn view_update(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn view_delete(state: State<'_, Db>, view_id: String) -> Result<(), String> {
     with_base(&state, |b| {
         let table_id: Option<String> = b
@@ -1348,7 +1382,7 @@ fn guess_mime(name: &str) -> &'static str {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn attachment_import(state: State<'_, Db>, paths: Vec<String>) -> Result<Vec<AttachmentMeta>, String> {
     with_base(&state, |b| {
         let mut out = Vec::new();
@@ -1375,7 +1409,7 @@ pub fn attachment_import(state: State<'_, Db>, paths: Vec<String>) -> Result<Vec
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn attachment_read(state: State<'_, Db>, id: String) -> Result<String, String> {
     use base64::Engine;
     with_base(&state, |b| {
@@ -1391,7 +1425,7 @@ pub fn attachment_read(state: State<'_, Db>, id: String) -> Result<String, Strin
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn attachment_metas(state: State<'_, Db>, ids: Vec<String>) -> Result<Vec<AttachmentMeta>, String> {
     with_base(&state, |b| {
         let mut out = Vec::new();
@@ -1422,7 +1456,7 @@ pub fn attachment_metas(state: State<'_, Db>, ids: Vec<String>) -> Result<Vec<At
 
 /// Remove blobs que nenhuma célula de anexo referencia mais (chamado pelo
 /// frontend de vez em quando; barato o suficiente pra rodar ao fechar).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn attachments_gc(state: State<'_, Db>) -> Result<i64, String> {
     with_base(&state, |b| {
         let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();

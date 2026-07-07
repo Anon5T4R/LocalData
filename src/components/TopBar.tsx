@@ -7,12 +7,28 @@ import { useOutsideClick } from "./cells";
 export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme: () => void }) {
   const store = useStore();
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [dragTab, setDragTab] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   useOutsideClick(menuRef, () => setMenuFor(null));
 
   const schema = store.schema;
   if (!schema) return null;
   const table = activeTable(store);
+
+  const dropTab = (targetId: string) => {
+    if (!dragTab || dragTab === targetId) {
+      setDragTab(null);
+      return;
+    }
+    const ids = schema.tables.map((t) => t.id);
+    const from = ids.indexOf(dragTab);
+    const to = ids.indexOf(targetId);
+    if (from >= 0 && to >= 0) {
+      ids.splice(to, 0, ids.splice(from, 1)[0]);
+      void store.reorderTables(ids);
+    }
+    setDragTab(null);
+  };
 
   return (
     <header className="topbar">
@@ -22,9 +38,20 @@ export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme:
       </div>
       <nav className="table-tabs">
         {schema.tables.map((t) => (
-          <div key={t.id} className={"table-tab" + (t.id === store.activeTableId ? " active" : "")}>
+          <div
+            key={t.id}
+            className={"table-tab" + (t.id === store.activeTableId ? " active" : "") + (dragTab === t.id ? " dragging" : "")}
+            onDragOver={(e) => dragTab && e.preventDefault()}
+            onDrop={() => dropTab(t.id)}
+          >
             <button
               className="table-tab-btn"
+              draggable
+              onDragStart={(e) => {
+                setDragTab(t.id);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragEnd={() => setDragTab(null)}
               onClick={() => store.setActiveTable(t.id)}
               onDoubleClick={() => {
                 const name = prompt("Novo nome da tabela:", t.name);

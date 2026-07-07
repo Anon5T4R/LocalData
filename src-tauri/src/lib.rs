@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 
 /// File path passed at launch (e.g. when opening a `.tbase` with the app), if any.
-#[tauri::command]
+#[tauri::command(async)]
 fn get_startup_file() -> Option<String> {
     std::env::args()
         .skip(1)
@@ -14,7 +14,7 @@ fn get_startup_file() -> Option<String> {
 }
 
 /// Read any file as base64 (import CSV/XLSX: o parse fica no webview, Rust só move bytes).
-#[tauri::command]
+#[tauri::command(async)]
 fn read_file_base64(path: String) -> Result<String, String> {
     use base64::Engine;
     let bytes = std::fs::read(&path).map_err(|e| format!("Falha ao ler '{}': {}", path, e))?;
@@ -22,7 +22,7 @@ fn read_file_base64(path: String) -> Result<String, String> {
 }
 
 /// Write a base64 payload to disk as binary (export XLSX/CSV).
-#[tauri::command]
+#[tauri::command(async)]
 fn write_file_base64(path: String, base64_data: String) -> Result<(), String> {
     use base64::Engine;
     if let Some(parent) = Path::new(&path).parent() {
@@ -77,6 +77,7 @@ pub fn run() {
             db::records_update,
             db::records_delete,
             db::records_insert_bulk,
+            db::records_restore,
             db::view_create,
             db::view_update,
             db::view_delete,

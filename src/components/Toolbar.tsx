@@ -215,7 +215,25 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
         )}
       </div>
 
+      <button
+        className="btn"
+        title="Desfazer (Ctrl+Z)"
+        disabled={!store.undoStack.length}
+        onClick={() => void store.undo()}
+      >
+        ↶
+      </button>
+      <button
+        className="btn"
+        title="Refazer (Ctrl+Y)"
+        disabled={!store.redoStack.length}
+        onClick={() => void store.redo()}
+      >
+        ↷
+      </button>
+
       <span style={{ flex: 1 }} />
+      {store.loading && <span className="muted rec-count">carregando…</span>}
       <span className="muted rec-count">
         {store.total} registro{store.total === 1 ? "" : "s"}
       </span>
