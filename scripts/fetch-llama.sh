@@ -4,10 +4,12 @@
 # AppImage não precisa de nenhuma ferramenta de zip. Só o Windows usa .zip
 # (scripts/fetch-llama.ps1).
 #
-# Robustez: usa o token do CI (GH_TOKEN) p/ evitar rate-limit; extrai SÓ URLs
-# reais de download (nunca a URL da API); tenta de novo se os assets ainda não
-# subiram (o llama.cpp publica a release e sobe os binários aos poucos); e valida
-# que o download é gzip antes de extrair.
+# Robustez:
+# - a release "latest" do llama.cpp fica INCOMPLETA por um tempo (os assets
+#   sobem aos poucos, e às vezes um build falha e nunca sobe) — então varremos
+#   as últimas releases e usamos a PRIMEIRA que tem o asset;
+# - só URLs de "browser_download_url" contam (nunca links do texto da release);
+# - token do CI (GH_TOKEN) evita rate-limit; download validado como gzip.
 # Uso: bash scripts/fetch-llama.sh
 set -euo pipefail
 
@@ -22,26 +24,31 @@ fi
 
 AUTH=()
 [ -n "${GH_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $GH_TOKEN")
-API_URL="https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+API_URL="https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=8"
 
-# Extrai uma URL de download de asset (github.com/.../*.tar.gz), nunca a URL da API.
+# Só campos browser_download_url do JSON — um por linha, na ordem das releases
+# (mais nova primeiro). grep por linha não atravessa aspas nem o body.
+asset_urls() {
+  printf '%s' "$1" | grep -oE '"browser_download_url": *"[^"]+"' | cut -d'"' -f4
+}
+
 find_url() {
-  local json="$1" u
-  u=$(printf '%s' "$json" | grep -oE 'https://github\.com/[^"]*ubuntu-vulkan-x64\.tar\.gz' | head -1 || true)
-  [ -z "$u" ] && u=$(printf '%s' "$json" | grep -oE 'https://github\.com/[^"]*ubuntu-x64\.tar\.gz' | head -1 || true)
+  local urls="$1" u
+  u=$(printf '%s\n' "$urls" | grep -E 'ubuntu-vulkan-x64\.tar\.gz$' | head -1 || true)
+  [ -z "$u" ] && u=$(printf '%s\n' "$urls" | grep -E 'ubuntu-x64\.tar\.gz$' | head -1 || true)
   printf '%s' "$u"
 }
 
 URL=""
-for attempt in 1 2 3 4 5; do
-  echo "Buscando release mais recente do llama.cpp (tentativa $attempt)..."
+for attempt in 1 2 3; do
+  echo "Buscando releases recentes do llama.cpp (tentativa $attempt)..."
   API=$(curl -fsSL --retry 3 --retry-delay 2 -H "User-Agent: localdata-app" "${AUTH[@]}" "$API_URL" || true)
-  URL=$(find_url "$API")
+  URL=$(find_url "$(asset_urls "$API")")
   [ -n "$URL" ] && break
-  echo "asset Linux ainda não disponível nesta release; aguardando 15s..."
+  echo "asset Linux não encontrado nas últimas releases; aguardando 15s..."
   sleep 15
 done
-[ -z "$URL" ] && { echo "asset ubuntu(-vulkan)-x64.tar.gz não encontrado"; exit 1; }
+[ -z "$URL" ] && { echo "asset ubuntu(-vulkan)-x64.tar.gz não encontrado nas últimas releases"; exit 1; }
 
 echo "Baixando $URL"
 curl -fsSL --retry 3 --retry-delay 2 "$URL" -o /tmp/llama.tar.gz
