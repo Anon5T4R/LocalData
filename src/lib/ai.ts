@@ -8,6 +8,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import * as api from "./backend";
 import type { BaseSchema, CellValue, Field, FieldType, FilterSpec, RecordRow, Table } from "./types";
+import { isComputed } from "./types";
 
 // --- Rust command wrappers (camelCase keys -> snake_case Rust params) ---
 
@@ -131,7 +132,7 @@ export function schemaContext(schema: BaseSchema): string {
 }
 
 export function rowsContext(table: Table, rows: RecordRow[], max = 20): string {
-  const fields = table.fields.filter((f) => f.type !== "formula" && f.type !== "attachment");
+  const fields = table.fields.filter((f) => !isComputed(f.type) && f.type !== "attachment");
   const lines = rows.slice(0, max).map((r) => {
     const parts = fields.map((f) => {
       let v = r.cells[f.id];
@@ -159,9 +160,9 @@ export const DATA_SYSTEM = (schema: string, activeTable: string, rows: string) =
   `- {"op":"insert","table":"Clientes","rows":[{"Nome":"Ana","Prioridade":"Alta"}]}\n` +
   `- {"op":"update","table":"Clientes","id":3,"set":{"Prioridade":"Baixa"}}  (use o id mostrado em [id N])\n` +
   `- {"op":"setFilter","filters":[{"field":"Preço","op":"gt","value":100}]}  (ops: eq neq contains gt gte lt lte empty not_empty checked unchecked has)\n` +
-  `Tipos de campo: text, long_text, number, checkbox, date, select, multi_select, formula.\n` +
-  `Valores: número como número JSON; checkbox true/false; data ISO "AAAA-MM-DD"; ` +
-  `select/multi_select pelo NOME da opção (novas opções são criadas automaticamente); ` +
+  `Tipos de campo: text, long_text, number, checkbox, date, select, multi_select, formula, rating, url, email, phone.\n` +
+  `Valores: número/rating como número JSON; checkbox true/false; data ISO "AAAA-MM-DD"; ` +
+  `url/email/phone como texto; select/multi_select pelo NOME da opção (novas opções são criadas automaticamente); ` +
   `formula precisa de "expr" (ex.: {"name":"Total","type":"formula","expr":"{Preço} * {Qtd}"}).\n` +
   `Faça exatamente o que foi pedido, da forma mais direta. ` +
   `Para PERGUNTAS sobre os dados, responda só em texto, sem JSON.`;
@@ -197,6 +198,10 @@ const AI_FIELD_TYPES: FieldType[] = [
   "select",
   "multi_select",
   "formula",
+  "rating",
+  "url",
+  "email",
+  "phone",
 ];
 
 let aiChoiceSeq = 0;
@@ -220,7 +225,8 @@ function findField(table: Table, name: string): Field {
 async function toCellValue(f: Field, v: unknown): Promise<CellValue> {
   if (v == null || v === "") return null;
   switch (f.type) {
-    case "number": {
+    case "number":
+    case "rating": {
       const n = typeof v === "number" ? v : parseFloat(String(v).replace(",", "."));
       if (isNaN(n)) throw new Error(`número inválido pra "${f.name}": ${JSON.stringify(v)}`);
       return n;
@@ -247,6 +253,9 @@ async function toCellValue(f: Field, v: unknown): Promise<CellValue> {
     }
     case "text":
     case "long_text":
+    case "url":
+    case "email":
+    case "phone":
       return typeof v === "string" ? v : JSON.stringify(v);
     default:
       throw new Error(`a IA não pode escrever no campo "${f.name}" (${f.type})`);

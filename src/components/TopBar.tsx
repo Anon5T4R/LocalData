@@ -77,6 +77,15 @@ export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme:
                     >
                       ✏️ Renomear tabela
                     </button>
+                    <button
+                      className="menu-item"
+                      onClick={() => {
+                        setMenuFor(null);
+                        void store.duplicateTable(t.id);
+                      }}
+                    >
+                      ⧉ Duplicar tabela (com dados)
+                    </button>
                     {schema.tables.length > 1 && (
                       <button
                         className="menu-item danger"

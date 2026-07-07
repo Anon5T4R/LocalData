@@ -1252,6 +1252,249 @@ body {
   font-size: 12px;
 }
 
+/* ---------- grade: seleção retangular, grupos, rodapé, coluna fixa ---------- */
+
+.grid-td.insel {
+  background: var(--accent-soft);
+}
+.sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background: inherit;
+}
+.grid-header .sticky-col {
+  z-index: 25;
+  background: var(--bg2);
+}
+.grid-rowno.sticky-col {
+  background: var(--bg);
+}
+.grid-row:hover .grid-rowno.sticky-col {
+  background: var(--bg3);
+}
+.grid-row.sel .grid-rowno.sticky-col {
+  background: var(--accent-soft);
+}
+
+.grid-group {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+.grid-group:hover {
+  filter: brightness(0.97);
+}
+.grid-group-caret {
+  color: var(--muted);
+  width: 14px;
+}
+.grid-group-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grid-group-count {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 8px;
+}
+
+.grid-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  background: var(--bg2);
+  border-top: 2px solid var(--border);
+}
+.grid-footer-cell {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-right: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.grid-footer-cell.agg {
+  cursor: pointer;
+}
+.grid-footer-cell.agg:not(.on) {
+  color: transparent;
+}
+.grid-footer:hover .grid-footer-cell.agg:not(.on) {
+  color: var(--muted);
+}
+.grid-footer-cell.agg.on {
+  color: var(--text);
+  font-weight: 600;
+}
+.grid-footer-cell.agg:hover {
+  background: var(--bg3);
+}
+
+/* ---------- células: tipos novos ---------- */
+
+.stars {
+  display: inline-flex;
+  gap: 1px;
+  line-height: 1;
+}
+.star {
+  color: var(--border);
+  font-size: 15px;
+}
+.star.on {
+  color: #f59e0b;
+}
+.stars.editable .star {
+  cursor: pointer;
+}
+.stars.editable .star:hover {
+  transform: scale(1.15);
+}
+.cell-rating-edit {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  height: 100%;
+}
+.cell-link {
+  color: var(--accent);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cell-link:hover {
+  text-decoration: underline;
+}
+.cell-lookup {
+  color: var(--muted);
+}
+.cell-config-warn {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+}
+.fdesc {
+  color: var(--muted);
+  font-size: 10px;
+  flex: none;
+}
+
+/* ---------- geral no front: transições, scrollbar, animações ---------- */
+
+.btn,
+.icon-btn,
+.menu-item,
+.table-tab-btn,
+.view-item-btn,
+.grid-th-btn,
+.recent-btn {
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.menu,
+.pop,
+.cell-pop {
+  animation: pop-in 0.12s ease;
+}
+.modal {
+  animation: modal-in 0.16s ease;
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.input:focus-visible,
+.btn:focus-visible,
+.icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.grid-empty {
+  padding: 28px 16px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.start-features {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 14px 0 4px;
+}
+.feature-chip {
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
 /* ---------- banner de erro ---------- */
 
 .error-banner {

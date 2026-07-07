@@ -27,6 +27,7 @@ import type {
   ViewConfig,
   ViewKind,
 } from "../lib/types";
+import { isComputed } from "../lib/types";
 
 const RECENTS_KEY = "localdata.recents";
 const PAGE_SIZE = 500;
@@ -86,14 +87,17 @@ interface DataState {
   addTable(name: string): Promise<void>;
   renameTable(id: string, name: string): Promise<void>;
   deleteTable(id: string): Promise<void>;
+  duplicateTable(id: string): Promise<void>;
   reorderTables(ids: string[]): Promise<void>;
   addField(name: string, type: FieldType, options: object): Promise<void>;
   updateField(fieldId: string, name?: string, options?: object): Promise<void>;
   changeFieldType(fieldId: string, type: FieldType, options?: object): Promise<void>;
   deleteField(fieldId: string): Promise<void>;
+  duplicateField(fieldId: string): Promise<void>;
   reorderFields(ids: string[]): Promise<void>;
   addView(name: string, kind: ViewKind, config?: ViewConfig): Promise<void>;
   renameView(id: string, name: string): Promise<void>;
+  duplicateView(id: string): Promise<void>;
   deleteView(id: string): Promise<void>;
   patchViewConfig(patch: Partial<ViewConfig>): Promise<void>;
 
@@ -103,6 +107,10 @@ interface DataState {
   duplicateRecord(recordId: number): Promise<number | null>;
   updateCell(recordId: number, fieldId: string, value: CellValue): Promise<void>;
   updateRecord(recordId: number, cells: Record<string, CellValue>): Promise<void>;
+  /** Atualiza vários registros numa transação, com um único passo de undo. */
+  updateRecordsBulk(updates: { id: number; cells: Record<string, CellValue> }[]): Promise<void>;
+  /** Cria vários registros numa transação; devolve os ids (um passo de undo). */
+  createRecordsBulk(rows: Record<string, CellValue>[]): Promise<number[] | null>;
   deleteRecords(ids: number[]): Promise<void>;
   undo(): Promise<void>;
   redo(): Promise<void>;
@@ -137,12 +145,12 @@ function msg(e: unknown): string {
   return typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
 }
 
-/** Só os campos com coluna real (fórmula é computada, não gravável). */
+/** Só os campos com coluna real (fórmula/lookup/rollup são computados). */
 function writableCells(table: Table | undefined, cells: Record<string, CellValue>): Record<string, CellValue> {
   if (!table) return cells;
-  const formulaIds = new Set(table.fields.filter((f) => f.type === "formula").map((f) => f.id));
+  const computedIds = new Set(table.fields.filter((f) => isComputed(f.type)).map((f) => f.id));
   const out: Record<string, CellValue> = {};
-  for (const [k, v] of Object.entries(cells)) if (!formulaIds.has(k)) out[k] = v;
+  for (const [k, v] of Object.entries(cells)) if (!computedIds.has(k)) out[k] = v;
   return out;
 }
 
@@ -322,6 +330,14 @@ export const useStore = create<DataState>((set, get) => {
       });
     },
 
+    async duplicateTable(id) {
+      await guard(async () => {
+        const newId = await api.tableDuplicate(id);
+        await reloadSchemaKeepingActive();
+        get().setActiveTable(newId);
+      });
+    },
+
     async reorderTables(ids) {
       await guard(async () => {
         await api.tablesReorder(ids);
@@ -365,6 +381,14 @@ export const useStore = create<DataState>((set, get) => {
       });
     },
 
+    async duplicateField(fieldId) {
+      await guard(async () => {
+        await api.fieldDuplicate(fieldId);
+        await reloadSchemaKeepingActive();
+        await get().refreshRows();
+      });
+    },
+
     async reorderFields(ids) {
       const tableId = get().activeTableId;
       if (!tableId) return;
@@ -389,6 +413,15 @@ export const useStore = create<DataState>((set, get) => {
       await guard(async () => {
         await api.viewUpdate(id, name);
         await reloadSchemaKeepingActive();
+      });
+    },
+
+    async duplicateView(id) {
+      await guard(async () => {
+        const newId = await api.viewDuplicate(id);
+        await reloadSchemaKeepingActive();
+        set({ activeViewId: newId });
+        await get().refreshRows();
       });
     },
 
@@ -505,6 +538,45 @@ export const useStore = create<DataState>((set, get) => {
         set({ error: msg(e) });
         void get().refreshRows();
       }
+    },
+
+    async updateRecordsBulk(updates) {
+      const st = get();
+      const tableId = st.activeTableId;
+      if (!tableId || !updates.length) return;
+      const table = activeTable(st);
+      const clean = updates.map((u) => ({ id: u.id, cells: writableCells(table, u.cells) })).filter((u) => Object.keys(u.cells).length);
+      if (!clean.length) return;
+      const byId = new Map(st.rows.map((r) => [r.id, r]));
+      const before = clean.map((u) => {
+        const row = byId.get(u.id);
+        const cells: Record<string, CellValue> = {};
+        for (const k of Object.keys(u.cells)) cells[k] = row?.cells[k] ?? null;
+        return { id: u.id, cells };
+      });
+      // otimista
+      const patch = new Map(clean.map((u) => [u.id, u.cells]));
+      set({
+        rows: st.rows.map((r) => (patch.has(r.id) ? { ...r, cells: { ...r.cells, ...patch.get(r.id) } } : r)),
+      });
+      const ok = await guard(async () => {
+        await api.recordsUpdate(tableId, clean);
+        return true;
+      });
+      if (ok) pushUndo({ type: "update", tableId, before, after: clean });
+      void get().refreshRows();
+    },
+
+    async createRecordsBulk(rows) {
+      const st = get();
+      const tableId = st.activeTableId;
+      if (!tableId || !rows.length) return null;
+      const table = activeTable(st);
+      const clean = rows.map((r) => writableCells(table, r));
+      const ids = await guard(() => api.recordsInsertBulk(tableId, clean));
+      if (ids) pushUndo({ type: "create", tableId, ids, rows: clean });
+      await get().refreshRows();
+      return ids;
     },
 
     async deleteRecords(ids) {

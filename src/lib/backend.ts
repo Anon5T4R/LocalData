@@ -27,6 +27,7 @@ export const getStartupFile = () => invoke<string | null>("get_startup_file");
 export const tableCreate = (name: string) => invoke<string>("table_create", { name });
 export const tableRename = (tableId: string, name: string) => invoke<void>("table_rename", { tableId, name });
 export const tableDelete = (tableId: string) => invoke<void>("table_delete", { tableId });
+export const tableDuplicate = (tableId: string) => invoke<string>("table_duplicate", { tableId });
 export const tablesReorder = (ids: string[]) => invoke<void>("tables_reorder", { ids });
 
 // --- campos ---
@@ -37,6 +38,7 @@ export const fieldUpdate = (fieldId: string, name?: string, options?: object) =>
 export const fieldChangeType = (fieldId: string, fieldType: string, options?: object) =>
   invoke<object>("field_change_type", { fieldId, fieldType, options: options ?? null });
 export const fieldDelete = (fieldId: string) => invoke<void>("field_delete", { fieldId });
+export const fieldDuplicate = (fieldId: string) => invoke<string>("field_duplicate", { fieldId });
 export const fieldsReorder = (tableId: string, ids: string[]) => invoke<void>("fields_reorder", { tableId, ids });
 
 // --- registros ---
@@ -73,6 +75,7 @@ export const viewCreate = (tableId: string, name: string, kind: ViewKind, config
   invoke<string>("view_create", { tableId, name, kind, config });
 export const viewUpdate = (viewId: string, name?: string, config?: ViewConfig) =>
   invoke<void>("view_update", { viewId, name: name ?? null, config: config ?? null });
+export const viewDuplicate = (viewId: string) => invoke<string>("view_duplicate", { viewId });
 export const viewDelete = (viewId: string) => invoke<void>("view_delete", { viewId });
 
 // --- anexos ---

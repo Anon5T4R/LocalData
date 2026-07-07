@@ -31,7 +31,8 @@ pub struct Db(pub Mutex<Option<Base>>);
 
 const SCHEMA_VERSION: i64 = 1;
 
-/// Tipos de campo suportados. "formula" é computado no frontend e não tem coluna.
+/// Tipos de campo suportados. "formula", "lookup" e "rollup" são computados
+/// no frontend e não têm coluna.
 pub const FIELD_TYPES: &[&str] = &[
     "text",
     "long_text",
@@ -43,10 +44,21 @@ pub const FIELD_TYPES: &[&str] = &[
     "link",
     "attachment",
     "formula",
+    "rating",
+    "url",
+    "email",
+    "phone",
+    "lookup",
+    "rollup",
 ];
 
 fn has_column(ftype: &str) -> bool {
-    ftype != "formula"
+    !matches!(ftype, "formula" | "lookup" | "rollup")
+}
+
+/// Tipos armazenados como texto livre (validação leve; a UI orienta o formato).
+fn is_textlike(ftype: &str) -> bool {
+    matches!(ftype, "text" | "long_text" | "url" | "email" | "phone")
 }
 
 /// ID curto, estável e seguro para identificador SQL (hex + contador).
@@ -267,12 +279,33 @@ fn cell_to_sql(ftype: &str, options: &Json, v: &Json) -> Result<SqlValue, String
         return Ok(SqlValue::Null);
     }
     match ftype {
-        "text" | "long_text" => match v {
+        "text" | "long_text" | "url" | "email" | "phone" => match v {
             Json::String(s) => Ok(SqlValue::Text(s.clone())),
             Json::Number(n) => Ok(SqlValue::Text(n.to_string())),
             Json::Bool(b) => Ok(SqlValue::Text(b.to_string())),
             _ => err("texto inválido"),
         },
+        "rating" => {
+            // inteiro 0..max (default 5); 0/null limpa
+            let max = options.get("max").and_then(|m| m.as_i64()).unwrap_or(5).clamp(1, 10);
+            let n = match v {
+                Json::Number(n) => n.as_f64().unwrap_or(0.0),
+                Json::String(s) => {
+                    let s = s.trim().replace(',', ".");
+                    if s.is_empty() {
+                        return Ok(SqlValue::Null);
+                    }
+                    s.parse::<f64>().map_err(|_| format!("avaliação inválida: '{}'", s))?
+                }
+                _ => return err("avaliação inválida"),
+            };
+            let n = n.round() as i64;
+            if n <= 0 {
+                Ok(SqlValue::Null)
+            } else {
+                Ok(SqlValue::Integer(n.min(max)))
+            }
+        }
         "number" => match v {
             Json::Number(n) => Ok(SqlValue::Real(n.as_f64().unwrap_or(0.0))),
             Json::String(s) => {
@@ -358,7 +391,7 @@ fn cell_to_sql(ftype: &str, options: &Json, v: &Json) -> Result<SqlValue, String
             }
             _ => err("anexo inválido (esperado array de ids)"),
         },
-        "formula" => err("campo de fórmula é somente leitura"),
+        "formula" | "lookup" | "rollup" => err("campo computado é somente leitura"),
         other => err(format!("tipo de campo desconhecido: '{}'", other)),
     }
 }
@@ -370,7 +403,7 @@ fn sql_to_json(ftype: &str, v: rusqlite::types::ValueRef<'_>) -> Json {
         return Json::Null;
     }
     match ftype {
-        "number" => match v {
+        "number" | "rating" => match v {
             VR::Real(f) => json!(f),
             VR::Integer(i) => json!(i),
             VR::Text(t) => String::from_utf8_lossy(t).parse::<f64>().map(|f| json!(f)).unwrap_or(Json::Null),
@@ -425,8 +458,9 @@ fn filter_sql(f: &Filter, fields: &[FieldMeta]) -> Result<(String, Vec<SqlValue>
         .find(|m| m.id == f.field_id)
         .ok_or("filtro aponta pra campo inexistente")?;
     if !has_column(&meta.ftype) {
-        return err("não é possível filtrar por campo de fórmula");
+        return err("não é possível filtrar por campo computado");
     }
+    let is_numeric = matches!(meta.ftype.as_str(), "number" | "rating");
     let col = format!("\"c_{}\"", meta.id);
     let vstr = f.value.as_str().map(|s| s.to_string()).unwrap_or_else(|| {
         if f.value.is_null() { String::new() } else { f.value.to_string().trim_matches('"').to_string() }
@@ -438,7 +472,7 @@ fn filter_sql(f: &Filter, fields: &[FieldMeta]) -> Result<(String, Vec<SqlValue>
     };
     match f.op.as_str() {
         "eq" => {
-            if meta.ftype == "number" {
+            if is_numeric {
                 let n = vnum.ok_or("valor numérico inválido no filtro")?;
                 Ok((format!("CAST({} AS REAL) = ?", col), vec![SqlValue::Real(n)]))
             } else {
@@ -446,7 +480,7 @@ fn filter_sql(f: &Filter, fields: &[FieldMeta]) -> Result<(String, Vec<SqlValue>
             }
         }
         "neq" => {
-            if meta.ftype == "number" {
+            if is_numeric {
                 let n = vnum.ok_or("valor numérico inválido no filtro")?;
                 Ok((format!("({0} IS NULL OR CAST({0} AS REAL) != ?)", col), vec![SqlValue::Real(n)]))
             } else {
@@ -470,7 +504,7 @@ fn filter_sql(f: &Filter, fields: &[FieldMeta]) -> Result<(String, Vec<SqlValue>
                 "lt" => "<",
                 _ => "<=",
             };
-            if meta.ftype == "number" {
+            if is_numeric {
                 let n = vnum.ok_or("valor numérico inválido no filtro")?;
                 Ok((format!("CAST({} AS REAL) {} ?", col, sym), vec![SqlValue::Real(n)]))
             } else {
@@ -519,10 +553,10 @@ fn build_where(
         if !q.is_empty() {
             let mut ors: Vec<String> = Vec::new();
             for m in fields {
-                if matches!(m.ftype.as_str(), "text" | "long_text" | "date") {
+                if is_textlike(&m.ftype) || m.ftype == "date" {
                     ors.push(format!("\"c_{}\" LIKE ? ESCAPE '\\'", m.id));
                     params.push(SqlValue::Text(format!("%{}%", like_escape(q))));
-                } else if m.ftype == "number" {
+                } else if matches!(m.ftype.as_str(), "number" | "rating") {
                     ors.push(format!("CAST(\"c_{}\" AS TEXT) LIKE ?", m.id));
                     params.push(SqlValue::Text(format!("%{}%", q)));
                 }
@@ -550,13 +584,13 @@ fn build_order(sorts: &[Sort], fields: &[FieldMeta]) -> Result<String, String> {
             .find(|m| m.id == s.field_id)
             .ok_or("ordenação aponta pra campo inexistente")?;
         if !has_column(&meta.ftype) {
-            return err("não é possível ordenar por campo de fórmula");
+            return err("não é possível ordenar por campo computado");
         }
         let col = format!("\"c_{}\"", meta.id);
         let dir = if s.desc { "DESC" } else { "ASC" };
         let expr = match meta.ftype.as_str() {
-            "number" => format!("CAST({} AS REAL) {}", col, dir),
-            "text" | "long_text" | "select" => format!("{} COLLATE NOCASE {}", col, dir),
+            "number" | "rating" => format!("CAST({} AS REAL) {}", col, dir),
+            t if is_textlike(t) || t == "select" => format!("{} COLLATE NOCASE {}", col, dir),
             _ => format!("{} {}", col, dir),
         };
         parts.push(expr);
@@ -745,6 +779,128 @@ pub fn tables_reorder(state: State<'_, Db>, ids: Vec<String>) -> Result<(), Stri
     })
 }
 
+/// Substitui, num JSON qualquer, valores string e CHAVES de objeto que sejam
+/// ids antigos (usado ao duplicar tabela: configs de view e options de campo
+/// referenciam ids de campo/tabela por valor ou por chave, ex.: widths).
+fn remap_json_ids(v: &Json, map: &std::collections::HashMap<String, String>) -> Json {
+    match v {
+        Json::String(s) => map.get(s).map(|n| json!(n)).unwrap_or_else(|| v.clone()),
+        Json::Array(items) => Json::Array(items.iter().map(|x| remap_json_ids(x, map)).collect()),
+        Json::Object(o) => {
+            let mut out = serde_json::Map::new();
+            for (k, val) in o {
+                let key = map.get(k).cloned().unwrap_or_else(|| k.clone());
+                out.insert(key, remap_json_ids(val, map));
+            }
+            Json::Object(out)
+        }
+        _ => v.clone(),
+    }
+}
+
+/// Duplica uma tabela inteira: metadados (campos e views ganham ids novos,
+/// referências internas remapeadas) e dados (mesmos ids de registro, então
+/// auto-relações continuam coerentes dentro da cópia).
+#[tauri::command(async)]
+pub fn table_duplicate(state: State<'_, Db>, table_id: String) -> Result<String, String> {
+    with_base(&state, |b| {
+        table_exists(&b.conn, &table_id)?;
+        let src_name: String = b
+            .conn
+            .query_row("SELECT name FROM _taylor_tables WHERE id = ?1", [&table_id], |r| r.get(0))
+            .map_err(db_err)?;
+        let fields = table_fields(&b.conn, &table_id)?;
+        let views: Vec<ViewMeta> = {
+            let mut stmt = b
+                .conn
+                .prepare("SELECT id, name, kind, config, pos FROM _taylor_views WHERE table_id = ?1 ORDER BY pos, rowid")
+                .map_err(db_err)?;
+            let rows = stmt
+                .query_map([&table_id], |r| {
+                    let cfg: String = r.get(3)?;
+                    Ok(ViewMeta {
+                        id: r.get(0)?,
+                        name: r.get(1)?,
+                        kind: r.get(2)?,
+                        config: serde_json::from_str(&cfg).unwrap_or(json!({})),
+                        pos: r.get(4)?,
+                    })
+                })
+                .map_err(db_err)?;
+            rows.collect::<Result<_, _>>().map_err(db_err)?
+        };
+
+        let new_tid = new_id();
+        let mut idmap: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        idmap.insert(table_id.clone(), new_tid.clone());
+        for f in &fields {
+            idmap.insert(f.id.clone(), new_id());
+        }
+
+        let tx = b.conn.transaction().map_err(db_err)?;
+        let pos: i64 = tx
+            .query_row("SELECT COALESCE(MAX(pos), -1) + 1 FROM _taylor_tables", [], |r| r.get(0))
+            .map_err(db_err)?;
+        tx.execute(
+            "INSERT INTO _taylor_tables(id, name, pos) VALUES (?1, ?2, ?3)",
+            rusqlite::params![new_tid, format!("{} (cópia)", src_name), pos],
+        )
+        .map_err(db_err)?;
+        for f in &fields {
+            let new_fid = &idmap[&f.id];
+            let options = remap_json_ids(&f.options, &idmap);
+            tx.execute(
+                "INSERT INTO _taylor_fields(id, table_id, name, type, options, pos) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![new_fid, new_tid, f.name, f.ftype, options.to_string(), f.pos],
+            )
+            .map_err(db_err)?;
+        }
+        for v in &views {
+            let config = remap_json_ids(&v.config, &idmap);
+            tx.execute(
+                "INSERT INTO _taylor_views(id, table_id, name, kind, config, pos) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![new_id(), new_tid, v.name, v.kind, config.to_string(), v.pos],
+            )
+            .map_err(db_err)?;
+        }
+
+        // tabela real: mesmas colunas (com ids novos) + cópia dos dados
+        let col_fields: Vec<&FieldMeta> = fields.iter().filter(|f| has_column(&f.ftype)).collect();
+        let new_cols = col_fields.iter().map(|f| format!("\"c_{}\"", idmap[&f.id])).collect::<Vec<_>>();
+        let old_cols = col_fields.iter().map(|f| format!("\"c_{}\"", f.id)).collect::<Vec<_>>();
+        tx.execute(
+            &format!(
+                "CREATE TABLE \"t_{}\" (id INTEGER PRIMARY KEY AUTOINCREMENT{})",
+                new_tid,
+                new_cols.iter().map(|c| format!(", {}", c)).collect::<String>()
+            ),
+            [],
+        )
+        .map_err(db_err)?;
+        if !new_cols.is_empty() {
+            tx.execute(
+                &format!(
+                    "INSERT INTO \"t_{}\" (id, {}) SELECT id, {} FROM \"t_{}\"",
+                    new_tid,
+                    new_cols.join(", "),
+                    old_cols.join(", "),
+                    table_id
+                ),
+                [],
+            )
+            .map_err(db_err)?;
+        } else {
+            tx.execute(
+                &format!("INSERT INTO \"t_{}\" (id) SELECT id FROM \"t_{}\"", new_tid, table_id),
+                [],
+            )
+            .map_err(db_err)?;
+        }
+        tx.commit().map_err(db_err)?;
+        Ok(new_tid)
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Comandos: campos
 // ---------------------------------------------------------------------------
@@ -914,11 +1070,17 @@ fn convert_value(old_type: &str, new_type: &str, new_options: &Json, v: &Json) -
         }
     };
     match new_type {
-        "text" | "long_text" => {
+        "text" | "long_text" | "url" | "email" | "phone" => {
             // select armazenava o id da opção — sem acesso às opções antigas aqui,
             // o frontend manda converter via nome quando importa (aceito o id).
             json!(as_text())
         }
+        "rating" => match v {
+            Json::Number(_) => v.clone(),
+            Json::String(s) => s.trim().replace(',', ".").parse::<f64>().map(|f| json!(f)).unwrap_or(Json::Null),
+            Json::Bool(b) => json!(*b as i64),
+            _ => Json::Null,
+        },
         "number" => match v {
             Json::Number(_) => v.clone(),
             Json::String(s) => s.trim().replace(',', ".").parse::<f64>().map(|f| json!(f)).unwrap_or(Json::Null),
@@ -979,6 +1141,43 @@ pub fn field_delete(state: State<'_, Db>, field_id: String) -> Result<(), String
         tx.execute("DELETE FROM _taylor_fields WHERE id = ?1", [&field_id]).map_err(db_err)?;
         tx.commit().map_err(db_err)?;
         Ok(())
+    })
+}
+
+/// Duplica um campo (mesmo tipo/opções) logo após o original, copiando os dados.
+#[tauri::command(async)]
+pub fn field_duplicate(state: State<'_, Db>, field_id: String) -> Result<String, String> {
+    with_base(&state, |b| {
+        let (table_id, ftype, options) = field_meta(&b.conn, &field_id)?;
+        let (name, pos): (String, i64) = b
+            .conn
+            .query_row("SELECT name, pos FROM _taylor_fields WHERE id = ?1", [&field_id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .map_err(db_err)?;
+        let new_fid = new_id();
+        let tx = b.conn.transaction().map_err(db_err)?;
+        tx.execute(
+            "UPDATE _taylor_fields SET pos = pos + 1 WHERE table_id = ?1 AND pos > ?2",
+            rusqlite::params![table_id, pos],
+        )
+        .map_err(db_err)?;
+        tx.execute(
+            "INSERT INTO _taylor_fields(id, table_id, name, type, options, pos) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![new_fid, table_id, format!("{} (cópia)", name), ftype, options.to_string(), pos + 1],
+        )
+        .map_err(db_err)?;
+        if has_column(&ftype) {
+            tx.execute(&format!("ALTER TABLE \"t_{}\" ADD COLUMN \"c_{}\"", table_id, new_fid), [])
+                .map_err(db_err)?;
+            tx.execute(
+                &format!("UPDATE \"t_{}\" SET \"c_{}\" = \"c_{}\"", table_id, new_fid, field_id),
+                [],
+            )
+            .map_err(db_err)?;
+        }
+        tx.commit().map_err(db_err)?;
+        Ok(new_fid)
     })
 }
 
@@ -1331,6 +1530,39 @@ pub fn view_update(
     })
 }
 
+/// Duplica uma view (mesma configuração) no fim da lista.
+#[tauri::command(async)]
+pub fn view_duplicate(state: State<'_, Db>, view_id: String) -> Result<String, String> {
+    with_base(&state, |b| {
+        let row: Option<(String, String, String, String)> = b
+            .conn
+            .query_row(
+                "SELECT table_id, name, kind, config FROM _taylor_views WHERE id = ?1",
+                [&view_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .optional()
+            .map_err(db_err)?;
+        let (table_id, name, kind, config) = row.ok_or("view não encontrada")?;
+        let new_vid = new_id();
+        let pos: i64 = b
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(pos), -1) + 1 FROM _taylor_views WHERE table_id = ?1",
+                [&table_id],
+                |r| r.get(0),
+            )
+            .map_err(db_err)?;
+        b.conn
+            .execute(
+                "INSERT INTO _taylor_views(id, table_id, name, kind, config, pos) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![new_vid, table_id, format!("{} (cópia)", name), kind, config, pos],
+            )
+            .map_err(db_err)?;
+        Ok(new_vid)
+    })
+}
+
 #[tauri::command(async)]
 pub fn view_delete(state: State<'_, Db>, view_id: String) -> Result<(), String> {
     with_base(&state, |b| {
@@ -1640,6 +1872,63 @@ mod tests {
             assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
             assert!(seen.insert(id));
         }
+    }
+
+    #[test]
+    fn valida_tipos_novos() {
+        // rating: arredonda, limita ao max e 0 vira NULL
+        assert!(matches!(cell_to_sql("rating", &json!({}), &json!(3)).unwrap(), SqlValue::Integer(3)));
+        assert!(matches!(cell_to_sql("rating", &json!({}), &json!(9)).unwrap(), SqlValue::Integer(5)));
+        assert!(matches!(cell_to_sql("rating", &json!({"max": 10}), &json!(9)).unwrap(), SqlValue::Integer(9)));
+        assert!(matches!(cell_to_sql("rating", &json!({}), &json!(0)).unwrap(), SqlValue::Null));
+        assert!(matches!(cell_to_sql("rating", &json!({}), &json!("4,4")).unwrap(), SqlValue::Integer(4)));
+        // url/email/phone armazenam texto
+        assert!(matches!(cell_to_sql("url", &json!({}), &json!("https://x.dev")).unwrap(), SqlValue::Text(_)));
+        assert!(matches!(cell_to_sql("email", &json!({}), &json!("a@b.c")).unwrap(), SqlValue::Text(_)));
+        // computados são somente leitura e não têm coluna
+        assert!(cell_to_sql("lookup", &json!({}), &json!("x")).is_err());
+        assert!(cell_to_sql("rollup", &json!({}), &json!("x")).is_err());
+        assert!(!has_column("lookup") && !has_column("rollup") && !has_column("formula"));
+        assert!(has_column("rating") && has_column("url"));
+    }
+
+    #[test]
+    fn duplica_tabela_remapeando_ids() {
+        let b = memory_base();
+        let s = read_schema(&b.conn, &b.path).unwrap();
+        let t = &s.tables[0];
+        let f0 = t.fields[0].id.clone();
+        // uma view com config que referencia o campo por valor e por chave
+        b.conn
+            .execute(
+                "UPDATE _taylor_views SET config = ?1 WHERE table_id = ?2",
+                rusqlite::params![
+                    json!({"hiddenFields": [f0], "widths": {f0.clone(): 240}}).to_string(),
+                    t.id
+                ],
+            )
+            .unwrap();
+        // um registro
+        b.conn
+            .execute(&format!("INSERT INTO \"t_{}\" (\"c_{}\") VALUES ('Oi')", t.id, f0), [])
+            .unwrap();
+
+        // duplica manualmente (mesma lógica do comando, sem State)
+        let fields = table_fields(&b.conn, &t.id).unwrap();
+        let mut idmap = std::collections::HashMap::new();
+        idmap.insert(t.id.clone(), "novaT".to_string());
+        for f in &fields {
+            idmap.insert(f.id.clone(), format!("n{}", f.id));
+        }
+        let cfg: String = b
+            .conn
+            .query_row("SELECT config FROM _taylor_views WHERE table_id = ?1", [&t.id], |r| r.get(0))
+            .unwrap();
+        let cfg: Json = serde_json::from_str(&cfg).unwrap();
+        let remapped = remap_json_ids(&cfg, &idmap);
+        assert_eq!(remapped["hiddenFields"][0], json!(format!("n{}", f0)));
+        assert_eq!(remapped["widths"][&format!("n{}", f0)], json!(240));
+        assert!(remapped["widths"].get(&f0).is_none());
     }
 
     #[test]

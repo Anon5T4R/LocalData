@@ -4,11 +4,12 @@
 import { useRef, useState } from "react";
 import { activeTable, activeView, useStore } from "../state/store";
 import type { FilterSpec, SortSpec } from "../lib/types";
-import { FIELD_TYPE_ICON, opsForType } from "../lib/types";
+import { FIELD_TYPE_ICON, isComputed, opsForType } from "../lib/types";
 import { useOutsideClick } from "./cells";
 import { exportTable, importFile } from "../lib/importer";
+import { GROUPABLE_TYPES } from "./GridView";
 
-type Pop = "filters" | "sorts" | "fields" | "io" | null;
+type Pop = "filters" | "sorts" | "fields" | "group" | "io" | null;
 
 export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
   const store = useStore();
@@ -23,7 +24,11 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
   const filters = view.config.filters ?? [];
   const sorts = view.config.sorts ?? [];
   const hidden = view.config.hiddenFields ?? [];
-  const filterableFields = table.fields.filter((f) => f.type !== "formula");
+  const filterableFields = table.fields.filter((f) => !isComputed(f.type));
+  const groupableFields = table.fields.filter((f) => GROUPABLE_TYPES.has(f.type));
+  const colorableFields = table.fields.filter((f) => f.type === "select");
+  const isGrid = view.kind === "grid";
+  const grouped = isGrid && !!view.config.groupField;
 
   const setFilters = (fs: FilterSpec[]) => void store.patchViewConfig({ filters: fs });
   const setSorts = (ss: SortSpec[]) => void store.patchViewConfig({ sorts: ss });
@@ -44,6 +49,11 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
         <button className={"btn" + (hidden.length ? " active" : "")} onClick={() => setPop(pop === "fields" ? null : "fields")}>
           👁 Campos{hidden.length ? ` (${hidden.length} ocultos)` : ""}
         </button>
+        {isGrid && (
+          <button className={"btn" + (grouped || view.config.colorField ? " active" : "")} onClick={() => setPop(pop === "group" ? null : "group")}>
+            ▤ Agrupar/Cor
+          </button>
+        )}
         <button className="btn" onClick={() => setPop(pop === "io" ? null : "io")}>
           ⇄ Importar/Exportar
         </button>
@@ -179,6 +189,41 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
                 <span className="ftype">{FIELD_TYPE_ICON[f.type]}</span> {f.name}
               </label>
             ))}
+          </div>
+        )}
+
+        {pop === "group" && (
+          <div className="pop">
+            <label className="form-label">Agrupar registros por</label>
+            <select
+              className="input input-sm"
+              value={view.config.groupField ?? ""}
+              onChange={(e) => void store.patchViewConfig({ groupField: e.target.value || undefined })}
+            >
+              <option value="">(sem agrupamento)</option>
+              {groupableFields.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+            <label className="form-label">Colorir linhas pelo campo</label>
+            {colorableFields.length ? (
+              <select
+                className="input input-sm"
+                value={view.config.colorField ?? ""}
+                onChange={(e) => void store.patchViewConfig({ colorField: e.target.value || undefined })}
+              >
+                <option value="">(sem cor)</option>
+                {colorableFields.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="hint">Crie um campo de seleção única pra colorir as linhas.</p>
+            )}
           </div>
         )}
 

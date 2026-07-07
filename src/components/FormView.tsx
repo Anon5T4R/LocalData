@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { activeTable, activeView, useStore } from "../state/store";
 import type { CellValue } from "../lib/types";
-import { FIELD_TYPE_LABEL } from "../lib/types";
+import { FIELD_TYPE_LABEL, isComputed } from "../lib/types";
 import { CellDisplay, CellEditor } from "./cells";
 
 export function FormView() {
@@ -19,7 +19,7 @@ export function FormView() {
   const order = view.config.formFields;
   const fields = (
     order ? (order.map((id) => table.fields.find((f) => f.id === id)).filter(Boolean) as typeof table.fields) : table.fields
-  ).filter((f) => f.type !== "formula");
+  ).filter((f) => !isComputed(f.type));
 
   const submit = async () => {
     const id = await store.addRecord(draft);
@@ -41,7 +41,7 @@ export function FormView() {
             <div className="record-field-label">{f.name}</div>
             <div
               className="record-field-value"
-              onClick={() => f.type !== "checkbox" && editing !== f.id && setEditing(f.id)}
+              onClick={() => f.type !== "checkbox" && f.type !== "rating" && editing !== f.id && setEditing(f.id)}
             >
               {editing === f.id ? (
                 <CellEditor
@@ -62,9 +62,10 @@ export function FormView() {
                   table={table}
                   tables={store.schema?.tables ?? []}
                   onToggle={f.type === "checkbox" ? (v) => setDraft({ ...draft, [f.id]: v }) : undefined}
+                  onRate={f.type === "rating" ? (n) => setDraft({ ...draft, [f.id]: n || null }) : undefined}
                 />
               )}
-              {draft[f.id] == null && editing !== f.id && f.type !== "checkbox" && (
+              {draft[f.id] == null && editing !== f.id && f.type !== "checkbox" && f.type !== "rating" && (
                 <span className="muted form-placeholder">{FIELD_TYPE_LABEL[f.type]}…</span>
               )}
             </div>

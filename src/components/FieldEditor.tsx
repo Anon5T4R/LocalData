@@ -3,8 +3,8 @@
 
 import { useState } from "react";
 import { activeTable, useStore } from "../state/store";
-import type { Choice, Field, FieldOptions, FieldType } from "../lib/types";
-import { CHOICE_COLORS, FIELD_TYPE_LABEL } from "../lib/types";
+import type { Choice, Field, FieldOptions, FieldType, NumberFormat, RollupAgg } from "../lib/types";
+import { CHOICE_COLORS, FIELD_TYPE_LABEL, ROLLUP_AGG_LABEL, isComputed } from "../lib/types";
 
 let choiceSeq = 0;
 function newChoiceId(): string {
@@ -30,18 +30,40 @@ export function FieldEditor({
   const [targetTable, setTargetTable] = useState(field?.options.tableId ?? tables[0]?.id ?? "");
   const [expr, setExpr] = useState(field?.options.expr ?? "");
   const [precision, setPrecision] = useState(field?.options.precision?.toString() ?? "");
+  const [format, setFormat] = useState<NumberFormat>(field?.options.format ?? "decimal");
   const [includeTime, setIncludeTime] = useState(field?.options.includeTime ?? false);
+  const [ratingMax, setRatingMax] = useState(field?.options.max?.toString() ?? "5");
+  const [linkFieldId, setLinkFieldId] = useState(field?.options.linkFieldId ?? "");
+  const [targetFieldId, setTargetFieldId] = useState(field?.options.targetFieldId ?? "");
+  const [agg, setAgg] = useState<RollupAgg>(field?.options.agg ?? "count");
+  const [description, setDescription] = useState(field?.options.description ?? "");
   const [busy, setBusy] = useState(false);
 
   if (!table) return null;
+
+  // lookup/rollup: relações desta tabela e campos (com coluna) da tabela alvo
+  const linkFields = table.fields.filter((f) => f.type === "link" && f.id !== field?.id);
+  const viaField = linkFields.find((f) => f.id === linkFieldId) ?? linkFields[0];
+  const viaTable = viaField ? tables.find((t) => t.id === viaField.options.tableId) : undefined;
+  const targetFields = (viaTable?.fields ?? []).filter((f) => !isComputed(f.type));
 
   const buildOptions = (): FieldOptions => {
     const o: FieldOptions = {};
     if (type === "select" || type === "multi_select") o.choices = choices;
     if (type === "link") o.tableId = targetTable;
     if (type === "formula") o.expr = expr;
-    if (type === "number" && precision !== "") o.precision = Math.max(0, Math.min(8, parseInt(precision, 10) || 0));
+    if (type === "number") {
+      if (precision !== "") o.precision = Math.max(0, Math.min(8, parseInt(precision, 10) || 0));
+      if (format !== "decimal") o.format = format;
+    }
     if (type === "date") o.includeTime = includeTime;
+    if (type === "rating") o.max = Math.max(1, Math.min(10, parseInt(ratingMax, 10) || 5));
+    if (type === "lookup" || type === "rollup") {
+      o.linkFieldId = viaField?.id ?? "";
+      o.targetFieldId = targetFields.some((f) => f.id === targetFieldId) ? targetFieldId : targetFields[0]?.id ?? "";
+      if (type === "rollup") o.agg = agg;
+    }
+    if (description.trim()) o.description = description.trim();
     return o;
   };
 
@@ -154,6 +176,13 @@ export function FieldEditor({
 
         {type === "number" && (
           <>
+            <label className="form-label">Formato</label>
+            <select className="input" value={format} onChange={(e) => setFormat(e.target.value as NumberFormat)}>
+              <option value="decimal">Decimal</option>
+              <option value="integer">Inteiro</option>
+              <option value="currency">Moeda (R$)</option>
+              <option value="percent">Percentual (%)</option>
+            </select>
             <label className="form-label">Casas decimais (vazio = automático)</label>
             <input
               className="input"
@@ -165,6 +194,55 @@ export function FieldEditor({
           </>
         )}
 
+        {type === "rating" && (
+          <>
+            <label className="form-label">Máximo de estrelas (1–10)</label>
+            <input
+              className="input"
+              inputMode="numeric"
+              value={ratingMax}
+              onChange={(e) => setRatingMax(e.target.value.replace(/\D/g, ""))}
+              placeholder="5"
+            />
+          </>
+        )}
+
+        {(type === "lookup" || type === "rollup") &&
+          (linkFields.length === 0 ? (
+            <p className="hint warn">Crie antes um campo de Relação nesta tabela — lookup/rollup buscam valores através dele.</p>
+          ) : (
+            <>
+              <label className="form-label">Através da relação</label>
+              <select className="input" value={viaField?.id ?? ""} onChange={(e) => setLinkFieldId(e.target.value)}>
+                {linkFields.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name} → {tables.find((t) => t.id === f.options.tableId)?.name ?? "?"}
+                  </option>
+                ))}
+              </select>
+              <label className="form-label">Campo da tabela relacionada</label>
+              <select className="input" value={targetFieldId} onChange={(e) => setTargetFieldId(e.target.value)}>
+                {targetFields.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+              {type === "rollup" && (
+                <>
+                  <label className="form-label">Agregação</label>
+                  <select className="input" value={agg} onChange={(e) => setAgg(e.target.value as RollupAgg)}>
+                    {(Object.keys(ROLLUP_AGG_LABEL) as RollupAgg[]).map((a) => (
+                      <option key={a} value={a}>
+                        {ROLLUP_AGG_LABEL[a]}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
+            </>
+          ))}
+
         {type === "date" && (
           <label className="check-label">
             <input type="checkbox" checked={includeTime} onChange={(e) => setIncludeTime(e.target.checked)} />
@@ -172,11 +250,23 @@ export function FieldEditor({
           </label>
         )}
 
+        <label className="form-label">Descrição (opcional, aparece como dica)</label>
+        <input
+          className="input"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="pra que serve este campo…"
+        />
+
         <div className="modal-actions">
           <button className="btn" onClick={onClose}>
             Cancelar
           </button>
-          <button className="btn primary" disabled={busy || !name.trim()} onClick={() => void save()}>
+          <button
+            className="btn primary"
+            disabled={busy || !name.trim() || ((type === "lookup" || type === "rollup") && !viaField)}
+            onClick={() => void save()}
+          >
             {mode === "new" ? "Criar campo" : "Salvar"}
           </button>
         </div>

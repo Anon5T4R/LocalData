@@ -38,6 +38,17 @@ export function StartScreen() {
         <div className="start-logo">◩</div>
         <h1>LocalData</h1>
         <p className="muted">Banco de dados visual, 100% offline, com IA local.</p>
+        <div className="start-features">
+          <span className="feature-chip">▦ Grade</span>
+          <span className="feature-chip">▤ Kanban</span>
+          <span className="feature-chip">📅 Calendário</span>
+          <span className="feature-chip">🖼 Galeria</span>
+          <span className="feature-chip">📝 Formulário</span>
+          <span className="feature-chip">↗ Relações + lookup</span>
+          <span className="feature-chip">ƒx Fórmulas</span>
+          <span className="feature-chip">⇄ XLSX/CSV</span>
+          <span className="feature-chip">✦ IA local</span>
+        </div>
         {!tauri && <p className="hint warn">Rodando no navegador — abra pelo app desktop pra usar os dados.</p>}
         <div className="start-actions">
           <button className="btn primary big" disabled={!tauri} onClick={() => void create()}>

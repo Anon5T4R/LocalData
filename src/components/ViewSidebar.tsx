@@ -57,6 +57,15 @@ export function ViewSidebar() {
               >
                 ✏️ Renomear
               </button>
+              <button
+                className="menu-item"
+                onClick={() => {
+                  setMenuFor(null);
+                  void store.duplicateView(v.id);
+                }}
+              >
+                ⧉ Duplicar
+              </button>
               {table.views.length > 1 && (
                 <button
                   className="menu-item danger"

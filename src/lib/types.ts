@@ -10,7 +10,21 @@ export type FieldType =
   | "multi_select"
   | "link"
   | "attachment"
-  | "formula";
+  | "formula"
+  | "rating"
+  | "url"
+  | "email"
+  | "phone"
+  | "lookup"
+  | "rollup";
+
+/** Campos computados no frontend: sem coluna no banco, somente leitura. */
+export function isComputed(t: FieldType): boolean {
+  return t === "formula" || t === "lookup" || t === "rollup";
+}
+
+export type NumberFormat = "decimal" | "integer" | "currency" | "percent";
+export type RollupAgg = "count" | "sum" | "avg" | "min" | "max" | "join";
 
 export interface Choice {
   id: string;
@@ -23,7 +37,13 @@ export interface FieldOptions {
   tableId?: string; // link: tabela alvo
   expr?: string; // formula
   precision?: number; // number
+  format?: NumberFormat; // number: exibição
   includeTime?: boolean; // date
+  max?: number; // rating: estrelas (default 5)
+  linkFieldId?: string; // lookup/rollup: campo de relação desta tabela
+  targetFieldId?: string; // lookup/rollup: campo da tabela relacionada
+  agg?: RollupAgg; // rollup
+  description?: string; // qualquer tipo: tooltip no cabeçalho
 }
 
 export interface Field {
@@ -61,13 +81,18 @@ export interface SortSpec {
   desc: boolean;
 }
 
+/** Agregação de rodapé da grade, por coluna. */
+export type AggKind = "filled" | "sum" | "avg" | "min" | "max";
+
 export interface ViewConfig {
   filters?: FilterSpec[];
   sorts?: SortSpec[];
   hiddenFields?: string[];
   widths?: Record<string, number>; // grid: largura por campo
   rowHeight?: "short" | "medium" | "tall"; // grid
-  groupField?: string; // kanban: campo select
+  groupField?: string; // kanban: campo select; grid: agrupamento
+  colorField?: string; // grid: campo select que colore as linhas
+  aggs?: Record<string, AggKind>; // grid: agregação do rodapé por campo
   dateField?: string; // calendar: campo date
   coverField?: string; // gallery: campo attachment
   formFields?: string[]; // form: campos exibidos, em ordem
@@ -123,6 +148,12 @@ export const FIELD_TYPE_LABEL: Record<FieldType, string> = {
   link: "Relação",
   attachment: "Anexo",
   formula: "Fórmula",
+  rating: "Avaliação",
+  url: "URL",
+  email: "E-mail",
+  phone: "Telefone",
+  lookup: "Lookup (via relação)",
+  rollup: "Rollup (agregação)",
 };
 
 export const FIELD_TYPE_ICON: Record<FieldType, string> = {
@@ -136,6 +167,21 @@ export const FIELD_TYPE_ICON: Record<FieldType, string> = {
   link: "↗",
   attachment: "📎",
   formula: "ƒx",
+  rating: "★",
+  url: "🔗",
+  email: "@",
+  phone: "☎",
+  lookup: "👁",
+  rollup: "Σ",
+};
+
+export const ROLLUP_AGG_LABEL: Record<RollupAgg, string> = {
+  count: "Contar",
+  sum: "Somar",
+  avg: "Média",
+  min: "Mínimo",
+  max: "Máximo",
+  join: "Listar valores",
 };
 
 export const CHOICE_COLORS = [
@@ -164,6 +210,7 @@ export function primaryField(table: Table): Field | undefined {
 export function opsForType(t: FieldType): { op: FilterSpec["op"]; label: string; needsValue: boolean }[] {
   switch (t) {
     case "number":
+    case "rating":
       return [
         { op: "eq", label: "=", needsValue: true },
         { op: "neq", label: "≠", needsValue: true },
@@ -207,6 +254,8 @@ export function opsForType(t: FieldType): { op: FilterSpec["op"]; label: string;
         { op: "not_empty", label: "não está vazio", needsValue: false },
       ];
     case "formula":
+    case "lookup":
+    case "rollup":
       return [];
     default:
       return [

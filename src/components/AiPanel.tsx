@@ -3,7 +3,9 @@
 // validadas contra o schema e aplicadas (ai.ts).
 
 import { useEffect, useRef, useState } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import * as ai from "../lib/ai";
+import { inTauri } from "../lib/backend";
 import { activeTable, useStore } from "../state/store";
 import { invalidateLinkLabels } from "./cells";
 
@@ -52,13 +54,35 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
   }, [msgs]);
 
-  const scan = async () => {
+  const scan = async (dirOverride?: string) => {
+    const d = dirOverride ?? dir;
+    if (!d.trim()) return;
     setErr("");
     try {
-      localStorage.setItem(K.dir, dir);
-      const found = await ai.listModels(dir);
-      setModels(found.filter((m) => !m.is_projector));
-      if (found.length && !found.some((m) => m.path === model)) setModel(found[0].path);
+      localStorage.setItem(K.dir, d);
+      const found = await ai.listModels(d);
+      const usable = found.filter((m) => !m.is_projector);
+      setModels(usable);
+      if (usable.length && !usable.some((m) => m.path === model)) setModel(usable[0].path);
+      if (!usable.length) setErr("nenhum .gguf encontrado nessa pasta");
+    } catch (e) {
+      setErr(String(e));
+    }
+  };
+
+  /** Abre o gerenciador de arquivos pra escolher a pasta dos modelos. */
+  const pickDir = async () => {
+    if (!inTauri()) return;
+    try {
+      const picked = await openDialog({
+        directory: true,
+        title: "Escolher a pasta dos modelos GGUF",
+        defaultPath: dir || undefined,
+      });
+      if (typeof picked === "string" && picked) {
+        setDir(picked);
+        await scan(picked);
+      }
     } catch (e) {
       setErr(String(e));
     }
@@ -166,9 +190,18 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
         <div className="ai-config">
           <label className="form-label">Pasta de modelos GGUF</label>
           <div className="pop-row">
-            <input className="input input-sm" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="C:\modelos" />
-            <button className="btn btn-sm" onClick={() => void scan()}>
-              Escanear
+            <input
+              className="input input-sm"
+              value={dir}
+              onChange={(e) => setDir(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void scan()}
+              placeholder="C:\modelos"
+            />
+            <button className="btn btn-sm" title="Procurar pasta no gerenciador de arquivos" onClick={() => void pickDir()}>
+              📁 Procurar…
+            </button>
+            <button className="btn btn-sm" title="Reescanear a pasta" onClick={() => void scan()}>
+              ⟳
             </button>
           </div>
           {models.length > 0 && (

@@ -3,7 +3,18 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "../lib/backend";
+
+/** Abre um link no app padrão do sistema (fallback: nova aba no browser). */
+async function openLink(href: string) {
+  try {
+    if (api.inTauri()) await openUrl(href);
+    else window.open(href, "_blank", "noopener");
+  } catch {
+    /* opener pode não estar liberado — ignora */
+  }
+}
 import { compileFormula, formatFormulaValue } from "../lib/formula";
 import type { AttachmentMeta, CellValue, Choice, Field, RecordRow, Table } from "../lib/types";
 import { choiceColor } from "../lib/types";
@@ -12,18 +23,20 @@ import { choiceColor } from "../lib/types";
 // caches de exibição (rótulos de relação e metadados/miniaturas de anexo)
 // ---------------------------------------------------------------------------
 
-const linkLabelCache = new Map<string, Map<number, string>>();
+// Linhas completas dos registros relacionados (null = registro removido).
+// Alimenta tanto os rótulos dos chips de relação quanto lookup/rollup.
+const linkRowCache = new Map<string, Map<number, RecordRow | null>>();
 
-/** Rótulos (campo primário) dos registros relacionados. */
-export function useLinkLabels(targetTable: Table | undefined, ids: number[]): Map<number, string> {
+/** Linhas dos registros relacionados, buscadas sob demanda e cacheadas. */
+export function useLinkedRows(targetTable: Table | undefined, ids: number[]): Map<number, RecordRow | null> {
   const [, bump] = useState(0);
   const key = targetTable?.id ?? "";
   useEffect(() => {
     if (!targetTable || !ids.length) return;
-    let cache = linkLabelCache.get(key);
+    let cache = linkRowCache.get(key);
     if (!cache) {
       cache = new Map();
-      linkLabelCache.set(key, cache);
+      linkRowCache.set(key, cache);
     }
     const missing = ids.filter((id) => !cache!.has(id));
     if (!missing.length) return;
@@ -32,12 +45,8 @@ export function useLinkLabels(targetTable: Table | undefined, ids: number[]): Ma
       .recordsByIds(targetTable.id, missing)
       .then((rows) => {
         if (dead) return;
-        const primary = targetTable.fields[0];
-        for (const r of rows) {
-          const v = primary ? r.cells[primary.id] : null;
-          cache!.set(r.id, v == null || v === "" ? `#${r.id}` : String(v));
-        }
-        for (const id of missing) if (!cache!.has(id)) cache!.set(id, `#${id}? (removido)`);
+        for (const r of rows) cache!.set(r.id, r);
+        for (const id of missing) if (!cache!.has(id)) cache!.set(id, null);
         bump((n) => n + 1);
       })
       .catch(() => {});
@@ -45,13 +54,29 @@ export function useLinkLabels(targetTable: Table | undefined, ids: number[]): Ma
       dead = true;
     };
   }, [key, ids.join(","), targetTable]); // eslint-disable-line react-hooks/exhaustive-deps
-  return linkLabelCache.get(key) ?? new Map();
+  return linkRowCache.get(key) ?? new Map();
 }
 
-/** Invalida o cache de rótulos (após editar registros da tabela alvo). */
+/** Rótulos (campo primário) dos registros relacionados. */
+export function useLinkLabels(targetTable: Table | undefined, ids: number[]): Map<number, string> {
+  const rows = useLinkedRows(targetTable, ids);
+  const out = new Map<number, string>();
+  const primary = targetTable?.fields[0];
+  for (const [id, r] of rows) {
+    if (!r) {
+      out.set(id, `#${id}? (removido)`);
+      continue;
+    }
+    const v = primary ? r.cells[primary.id] : null;
+    out.set(id, v == null || v === "" ? `#${id}` : String(v));
+  }
+  return out;
+}
+
+/** Invalida o cache de linhas relacionadas (após editar registros da tabela alvo). */
 export function invalidateLinkLabels(tableId?: string) {
-  if (tableId) linkLabelCache.delete(tableId);
-  else linkLabelCache.clear();
+  if (tableId) linkRowCache.delete(tableId);
+  else linkRowCache.clear();
 }
 
 const attMetaCache = new Map<string, AttachmentMeta>();
@@ -104,9 +129,73 @@ export function formatDate(v: string, includeTime?: boolean): string {
   return includeTime && m[4] ? `${base} ${m[4]}:${m[5]}` : base;
 }
 
-export function formatNumber(v: number, precision?: number): string {
-  if (precision != null) return v.toFixed(precision).replace(".", ",");
-  return String(Math.round(v * 1e6) / 1e6).replace(".", ",");
+export function formatNumber(v: number, opts?: { precision?: number; format?: string }): string {
+  const precision = opts?.precision;
+  switch (opts?.format) {
+    case "integer":
+      return Math.round(v).toLocaleString("pt-BR");
+    case "currency":
+      return v.toLocaleString("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+        minimumFractionDigits: precision ?? 2,
+        maximumFractionDigits: precision ?? 2,
+      });
+    case "percent": {
+      const s = precision != null ? v.toFixed(precision).replace(".", ",") : String(Math.round(v * 1e6) / 1e6).replace(".", ",");
+      return s + "%";
+    }
+    default:
+      if (precision != null) return v.toFixed(precision).replace(".", ",");
+      return String(Math.round(v * 1e6) / 1e6).replace(".", ",");
+  }
+}
+
+/**
+ * Valor de célula como texto simples, por tipo (select vira nome da opção,
+ * data vira dd/mm/aaaa etc.) — usado por lookup/rollup, copiar/colar e export.
+ */
+export function plainCellText(field: Field, value: CellValue, tables: Table[]): string {
+  if (value == null || value === "") return "";
+  switch (field.type) {
+    case "number":
+      return typeof value === "number" ? formatNumber(value, field.options) : String(value);
+    case "rating":
+      return typeof value === "number" ? String(value) : "";
+    case "checkbox":
+      return value ? "✓" : "";
+    case "date":
+      return typeof value === "string" ? formatDate(value, field.options.includeTime) : "";
+    case "select": {
+      const c = (field.options.choices ?? []).find((c) => c.id === value);
+      return c?.name ?? "";
+    }
+    case "multi_select": {
+      const ids = Array.isArray(value) ? (value as string[]) : [];
+      const choices = field.options.choices ?? [];
+      return ids.map((id) => choices.find((c) => c.id === id)?.name ?? "").filter(Boolean).join(", ");
+    }
+    case "link": {
+      // rótulos podem não estar no cache ainda; usa o que houver
+      const target = tables.find((t) => t.id === field.options.tableId);
+      const cache = target ? linkRowCache.get(target.id) : undefined;
+      const primary = target?.fields[0];
+      const ids = Array.isArray(value) ? (value as number[]) : [];
+      return ids
+        .map((id) => {
+          const r = cache?.get(id);
+          const v = r && primary ? r.cells[primary.id] : null;
+          return v == null || v === "" ? `#${id}` : String(v);
+        })
+        .join(", ");
+    }
+    case "attachment": {
+      const ids = Array.isArray(value) ? (value as string[]) : [];
+      return ids.map((id) => attMetaCache.get(id)?.name ?? "📎").join(", ");
+    }
+    default:
+      return String(value);
+  }
 }
 
 function ChoiceChip({ choice, idx }: { choice: Choice; idx: number }) {
@@ -115,6 +204,75 @@ function ChoiceChip({ choice, idx }: { choice: Choice; idx: number }) {
       {choice.name}
     </span>
   );
+}
+
+/** Estrelas de avaliação; com onRate vira clicável (clicar na atual limpa). */
+export function RatingStars({
+  value,
+  max,
+  onRate,
+}: {
+  value: number;
+  max: number;
+  onRate?: (n: number) => void;
+}) {
+  return (
+    <span className={"stars" + (onRate ? " editable" : "")}>
+      {Array.from({ length: max }, (_, i) => (
+        <span
+          key={i}
+          className={"star" + (i < value ? " on" : "")}
+          onClick={
+            onRate
+              ? (e) => {
+                  e.stopPropagation();
+                  onRate(i + 1 === value ? 0 : i + 1);
+                }
+              : undefined
+          }
+        >
+          ★
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** Agrega valores de um rollup. */
+export function computeRollup(
+  agg: string,
+  targetField: Field,
+  values: CellValue[],
+  tables: Table[]
+): string {
+  const present = values.filter((v) => v != null && v !== "" && !(Array.isArray(v) && v.length === 0));
+  switch (agg) {
+    case "count":
+      return String(present.length);
+    case "join":
+      return present.map((v) => plainCellText(targetField, v, tables)).filter(Boolean).join(", ");
+    default: {
+      const nums = present
+        .map((v) => (typeof v === "number" ? v : parseFloat(String(v).replace(",", "."))))
+        .filter((n) => !isNaN(n));
+      if (!nums.length) return "";
+      let out: number;
+      switch (agg) {
+        case "sum":
+          out = nums.reduce((a, b) => a + b, 0);
+          break;
+        case "avg":
+          out = nums.reduce((a, b) => a + b, 0) / nums.length;
+          break;
+        case "min":
+          out = Math.min(...nums);
+          break;
+        default:
+          out = Math.max(...nums);
+      }
+      return formatNumber(Math.round(out * 1e6) / 1e6, targetField.options);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +286,7 @@ export function CellDisplay({
   table,
   tables,
   onToggle,
+  onRate,
 }: {
   field: Field;
   value: CellValue;
@@ -136,6 +295,8 @@ export function CellDisplay({
   tables: Table[];
   /** checkbox alterna direto no clique (grade) */
   onToggle?: (v: boolean) => void;
+  /** rating define direto no clique (grade) */
+  onRate?: (n: number) => void;
 }) {
   const formula = useMemo(
     () => (field.type === "formula" ? compileFormula(field.options.expr ?? "", table.fields) : null),
@@ -149,7 +310,56 @@ export function CellDisplay({
   const attIds = field.type === "attachment" && Array.isArray(value) ? (value as string[]) : [];
   const { metas, thumbs } = useAttachments(attIds);
 
+  // lookup/rollup: registros da tabela alvo via o campo de relação configurado
+  const isViaLink = field.type === "lookup" || field.type === "rollup";
+  const viaField = isViaLink
+    ? table.fields.find((f) => f.id === field.options.linkFieldId && f.type === "link")
+    : undefined;
+  const viaRaw = viaField ? row.cells[viaField.id] : null;
+  const viaIds = viaField && Array.isArray(viaRaw) ? (viaRaw as number[]) : [];
+  const viaTable = viaField ? tables.find((t) => t.id === viaField.options.tableId) : undefined;
+  const viaRows = useLinkedRows(viaTable, viaIds);
+
   switch (field.type) {
+    case "lookup":
+    case "rollup": {
+      const targetField = viaTable?.fields.find((f) => f.id === field.options.targetFieldId);
+      if (!viaField || !viaTable || !targetField) {
+        return <span className="cell-config-warn">⚠ configurar campo</span>;
+      }
+      const values = viaIds.map((id) => viaRows.get(id)?.cells[targetField.id] ?? null);
+      if (field.type === "rollup") {
+        return <span className="cell-num">{computeRollup(field.options.agg ?? "count", targetField, values, tables)}</span>;
+      }
+      const texts = values.map((v) => plainCellText(targetField, v, tables)).filter(Boolean);
+      return <span className="cell-lookup">{texts.join(", ")}</span>;
+    }
+    case "rating": {
+      const max = field.options.max ?? 5;
+      const n = typeof value === "number" ? value : 0;
+      return <RatingStars value={n} max={max} onRate={onRate} />;
+    }
+    case "url":
+    case "email":
+    case "phone": {
+      const s = typeof value === "string" ? value : "";
+      if (!s) return <span />;
+      const href = field.type === "url" ? (s.match(/^[a-z]+:\/\//i) ? s : `https://${s}`) : field.type === "email" ? `mailto:${s}` : `tel:${s}`;
+      return (
+        <a
+          className="cell-link"
+          href={href}
+          title={href}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void openLink(href);
+          }}
+        >
+          {s}
+        </a>
+      );
+    }
     case "checkbox":
       return (
         <span
@@ -167,7 +377,7 @@ export function CellDisplay({
         </span>
       );
     case "number":
-      return <span className="cell-num">{typeof value === "number" ? formatNumber(value, field.options.precision) : ""}</span>;
+      return <span className="cell-num">{typeof value === "number" ? formatNumber(value, field.options) : ""}</span>;
     case "date":
       return <span>{typeof value === "string" && value ? formatDate(value, field.options.includeTime) : ""}</span>;
     case "select": {
@@ -243,11 +453,23 @@ export function CellEditor({
 }) {
   switch (field.type) {
     case "text":
+    case "url":
+    case "email":
+    case "phone":
       return <TextEditor value={value} commit={commit} cancel={cancel} autoFocus={autoFocus} />;
     case "long_text":
       return <TextEditor value={value} commit={commit} cancel={cancel} autoFocus={autoFocus} multiline />;
     case "number":
       return <TextEditor value={value} commit={(v) => commit(parseNum(v))} cancel={cancel} autoFocus={autoFocus} numeric />;
+    case "rating": {
+      const max = field.options.max ?? 5;
+      const n = typeof value === "number" ? value : 0;
+      return (
+        <span className="cell-rating-edit">
+          <RatingStars value={n} max={max} onRate={(v) => commit(v || null)} />
+        </span>
+      );
+    }
     case "date":
       return <DateEditor value={value} includeTime={field.options.includeTime} commit={commit} cancel={cancel} />;
     case "select":

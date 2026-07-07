@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { activeTable, useStore } from "../state/store";
 import type { CellValue, Field, RecordRow } from "../lib/types";
-import { FIELD_TYPE_ICON, FIELD_TYPE_LABEL } from "../lib/types";
+import { FIELD_TYPE_ICON, FIELD_TYPE_LABEL, isComputed } from "../lib/types";
 import { CellDisplay, CellEditor, invalidateLinkLabels } from "./cells";
 
 export function RecordModal() {
@@ -59,13 +59,16 @@ export function RecordModal() {
         <div className="record-fields">
           {table.fields.map((f) => (
             <div key={f.id} className="record-field">
-              <div className="record-field-label" title={FIELD_TYPE_LABEL[f.type]}>
+              <div
+                className="record-field-label"
+                title={f.options.description ? `${FIELD_TYPE_LABEL[f.type]} — ${f.options.description}` : FIELD_TYPE_LABEL[f.type]}
+              >
                 <span className="ftype">{FIELD_TYPE_ICON[f.type]}</span> {f.name}
               </div>
               <div
                 className="record-field-value"
                 onClick={() => {
-                  if (f.type !== "formula" && f.type !== "checkbox" && editingField !== f.id) {
+                  if (!isComputed(f.type) && f.type !== "checkbox" && f.type !== "rating" && editingField !== f.id) {
                     setEditingField(f.id);
                   }
                 }}
@@ -86,6 +89,7 @@ export function RecordModal() {
                     table={table}
                     tables={store.schema?.tables ?? []}
                     onToggle={f.type === "checkbox" ? (v) => commitField(f, v) : undefined}
+                    onRate={f.type === "rating" ? (n) => commitField(f, n || null) : undefined}
                   />
                 )}
               </div>
