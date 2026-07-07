@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c3aed"/>
+      <stop offset="1" stop-color="#a855f7"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
+  <!-- cilindro de banco de dados -->
+  <g fill="none" stroke="#ffffff" stroke-width="52" stroke-linecap="round">
+    <ellipse cx="512" cy="330" rx="240" ry="96"/>
+    <path d="M 272 330 V 660 C 272 713 379 756 512 756 C 645 756 752 713 752 660 V 330"/>
+    <path d="M 272 495 C 272 548 379 591 512 591 C 645 591 752 548 752 495"/>
+  </g>
+  <!-- easter egg da marca -->
+  <text x="512" y="905" text-anchor="middle" font-family="Segoe Script, Brush Script MT, cursive" font-size="96" fill="#ffffff" opacity="0.92">Taylor</text>
+</svg>
