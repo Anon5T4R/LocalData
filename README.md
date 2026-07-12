@@ -2,7 +2,7 @@
 
 Banco de dados visual **100% offline** — um Airtable/Access local, com **IA local**.
 Multiusuário na rede da empresa, extensível e sem nuvem.
-Parte da suíte Taylor (LocalOffice, LocalSheets, LocalSlides, LocalCode, TaylorHub).
+Parte da suíte Local (LocalOffice, LocalSheets, LocalSlides, LocalCode, TaylorHub).
 
 ## O que ele faz
 
