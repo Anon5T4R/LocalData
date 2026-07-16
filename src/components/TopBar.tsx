@@ -10,6 +10,8 @@ import { isRemote, useRemote } from "../lib/remote";
 import { useOutsideClick } from "./cells";
 import { ServerPanel } from "./ServerPanel";
 import { AuditPanel } from "./AuditPanel";
+import { LocalePicker } from "./LocalePicker";
+import { t as tr } from "../lib/i18n";
 
 export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme: () => void }) {
   const store = useStore();
@@ -78,7 +80,7 @@ export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme:
               onDragEnd={() => setDragTab(null)}
               onClick={() => store.setActiveTable(t.id)}
               onDoubleClick={() => {
-                const name = prompt("Novo nome da tabela:", t.name);
+                const name = prompt(tr("tb.renameTablePrompt"), t.name);
                 if (name?.trim()) void store.renameTable(t.id, name.trim());
               }}
             >
@@ -95,11 +97,11 @@ export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme:
                       className="menu-item"
                       onClick={() => {
                         setMenuFor(null);
-                        const name = prompt("Novo nome da tabela:", t.name);
+                        const name = prompt(tr("tb.renameTablePrompt"), t.name);
                         if (name?.trim()) void store.renameTable(t.id, name.trim());
                       }}
                     >
-                      ✏️ Renomear tabela
+                      {tr("tb.renameTable")}
                     </button>
                     <button
                       className="menu-item"
@@ -108,19 +110,19 @@ export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme:
                         void store.duplicateTable(t.id);
                       }}
                     >
-                      ⧉ Duplicar tabela (com dados)
+                      {tr("tb.dupTable")}
                     </button>
                     {schema.tables.length > 1 && (
                       <button
                         className="menu-item danger"
                         onClick={() => {
                           setMenuFor(null);
-                          if (confirm(`Excluir a tabela "${t.name}" e TODOS os registros?`)) {
+                          if (confirm(tr("tb.deleteTableConfirm", { name: t.name }))) {
                             void store.deleteTable(t.id);
                           }
                         }}
                       >
-                        🗑 Excluir tabela
+                        {tr("tb.deleteTable")}
                       </button>
                     )}
                   </div>
@@ -131,9 +133,9 @@ export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme:
         ))}
         <button
           className="table-tab-add"
-          title="Nova tabela"
+          title={tr("tb.newTableTitle")}
           onClick={() => {
-            const name = prompt("Nome da nova tabela:", `Tabela ${schema.tables.length + 1}`);
+            const name = prompt(tr("tb.newTablePrompt"), tr("tb.newTableDefault", { n: schema.tables.length + 1 }));
             if (name?.trim()) void store.addTable(name.trim());
           }}
         >
@@ -141,20 +143,20 @@ export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme:
         </button>
       </nav>
       <span style={{ flex: 1 }} />
-      {table && <span className="muted topbar-hint">{table.fields.length} campos</span>}
+      {table && <span className="muted topbar-hint">{tr("tb.fieldsCount", { n: table.fields.length })}</span>}
       {inTauri() && (
         <div className="ext-menu-wrap" ref={extRef}>
           <button
             className={"icon-btn" + (ext.errors.length ? " ext-err" : "")}
-            title="Extensões (tipos de campo plugáveis)"
+            title={tr("tb.extTitle")}
             onClick={() => setExtMenu(!extMenu)}
           >
             🧩
           </button>
           {extMenu && (
             <div className="menu ext-menu">
-              <div className="ext-menu-head">Extensões — tipos de campo</div>
-              {ext.types.length === 0 && <div className="menu-note muted">Nenhum tipo registrado ainda.</div>}
+              <div className="ext-menu-head">{tr("tb.extHead")}</div>
+              {ext.types.length === 0 && <div className="menu-note muted">{tr("tb.extNone")}</div>}
               {ext.types.map((t) => (
                 <div key={t.id} className="menu-note" title={t.description}>
                   {t.icon ?? "🧩"} <strong>{t.name}</strong> <span className="muted">· {t.file}</span>
@@ -172,7 +174,7 @@ export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme:
                   void openExtensionsFolder();
                 }}
               >
-                📂 Abrir pasta de extensões
+                {tr("tb.extOpenFolder")}
               </button>
               <button
                 className="menu-item"
@@ -180,35 +182,34 @@ export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme:
                   void ext.reload();
                 }}
               >
-                ⟳ Recarregar extensões
+                {tr("tb.extReload")}
               </button>
-              <div className="menu-note muted">
-                Solte um .js na pasta e recarregue — o exemplo "exemplo-cpf.js" documenta a API.
-              </div>
+              <div className="menu-note muted">{tr("tb.extNote")}</div>
             </div>
           )}
         </div>
       )}
       {isRemote() && (
-        <span className="remote-badge" title={`Conectado a ${remote.session?.url} como ${remote.session?.name}`}>
+        <span className="remote-badge" title={tr("tb.remoteBadgeTitle", { url: remote.session?.url ?? "", name: remote.session?.name ?? "" })}>
           🌐 {remote.session?.name} ({remote.session?.role})
         </span>
       )}
       {inTauri() && remoteAdmin && (
-        <button className="icon-btn" title="Histórico de alterações" onClick={() => setAuditOpen(true)}>
+        <button className="icon-btn" title={tr("tb.auditTitle")} onClick={() => setAuditOpen(true)}>
           🕘
         </button>
       )}
       {inTauri() && !isRemote() && (
-        <button className="icon-btn" title="Servidor multiusuário e usuários" onClick={() => setServerOpen(true)}>
+        <button className="icon-btn" title={tr("tb.serverTitle")} onClick={() => setServerOpen(true)}>
           🌐
         </button>
       )}
-      <button className="icon-btn" title="Alternar tema" onClick={onToggleTheme}>
+      <LocalePicker />
+      <button className="icon-btn" title={tr("theme.toggle")} onClick={onToggleTheme}>
         {theme === "dark" ? "☀" : "🌙"}
       </button>
       <button className="btn" onClick={() => void store.closeBase()}>
-        {isRemote() ? "Desconectar" : "Fechar base"}
+        {isRemote() ? tr("tb.disconnect") : tr("tb.closeBase")}
       </button>
       {serverOpen && <ServerPanel onClose={() => setServerOpen(false)} />}
       {auditOpen && <AuditPanel onClose={() => setAuditOpen(false)} />}

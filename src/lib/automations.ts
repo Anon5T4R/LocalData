@@ -14,6 +14,7 @@
 
 import * as api from "./backend";
 import type { CellValue, Field, RecordRow, Table } from "./types";
+import { t } from "./i18n";
 
 export interface Automation {
   id: string;
@@ -33,7 +34,7 @@ export function parseAutomation(a: api.AutomationMeta): Automation {
   return {
     id: a.id,
     tableId: a.tableId,
-    name: c.name ?? "Automação",
+    name: c.name ?? t("auto.defaultName"),
     enabled: c.enabled ?? true,
     trigger: c.trigger ?? { kind: "record_created" },
     action: c.action ?? { kind: "notify", message: "" },
@@ -119,7 +120,7 @@ export async function runAutomations(
 
       // ação
       if (act.kind === "notify") {
-        void notify(`Automação: ${auto.name}`, interpolate(act.message, table, row.cells));
+        void notify(t("auto.notifyTitle", { name: auto.name }), interpolate(act.message, table, row.cells));
       } else {
         const f = table.fields.find((x) => x.id === act.fieldId);
         if (f) updates.push({ id: row.id, cells: { [f.id]: actionValue(f, act.value) } });

@@ -1,5 +1,7 @@
 // Modelo de dados do LocalData — espelha o que o Rust serializa (camelCase).
 
+import { t as tr, type MessageKey } from "./i18n";
+
 export type FieldType =
   | "text"
   | "long_text"
@@ -146,25 +148,31 @@ export interface AttachmentMeta {
   size: number;
 }
 
-export const FIELD_TYPE_LABEL: Record<FieldType, string> = {
-  text: "Texto",
-  long_text: "Texto longo",
-  number: "Número",
-  checkbox: "Checkbox",
-  date: "Data",
-  select: "Seleção única",
-  multi_select: "Seleção múltipla",
-  link: "Relação",
-  attachment: "Anexo",
-  formula: "Fórmula",
-  rating: "Avaliação",
-  url: "URL",
-  email: "E-mail",
-  phone: "Telefone",
-  lookup: "Lookup (via relação)",
-  rollup: "Rollup (agregação)",
-  custom: "Extensão",
-};
+/** Ordem canônica dos tipos de campo (pro seletor). */
+export const FIELD_TYPES: FieldType[] = [
+  "text",
+  "long_text",
+  "number",
+  "checkbox",
+  "date",
+  "select",
+  "multi_select",
+  "link",
+  "attachment",
+  "formula",
+  "rating",
+  "url",
+  "email",
+  "phone",
+  "lookup",
+  "rollup",
+  "custom",
+];
+
+/** Rótulo localizado do tipo de campo. */
+export function fieldTypeLabel(t: FieldType): string {
+  return tr(`ftype.${t}` as MessageKey);
+}
 
 export const FIELD_TYPE_ICON: Record<FieldType, string> = {
   text: "A",
@@ -186,14 +194,13 @@ export const FIELD_TYPE_ICON: Record<FieldType, string> = {
   custom: "🧩",
 };
 
-export const ROLLUP_AGG_LABEL: Record<RollupAgg, string> = {
-  count: "Contar",
-  sum: "Somar",
-  avg: "Média",
-  min: "Mínimo",
-  max: "Máximo",
-  join: "Listar valores",
-};
+/** Ordem canônica das agregações de rollup (pro seletor). */
+export const ROLLUP_AGGS: RollupAgg[] = ["count", "sum", "avg", "min", "max", "join"];
+
+/** Rótulo localizado da agregação de rollup. */
+export function rollupAggLabel(a: RollupAgg): string {
+  return tr(`agg.${a}` as MessageKey);
+}
 
 export const CHOICE_COLORS = [
   "#3b82f6",
@@ -229,40 +236,40 @@ export function opsForType(t: FieldType): { op: FilterSpec["op"]; label: string;
         { op: "gte", label: "≥", needsValue: true },
         { op: "lt", label: "<", needsValue: true },
         { op: "lte", label: "≤", needsValue: true },
-        { op: "empty", label: "está vazio", needsValue: false },
-        { op: "not_empty", label: "não está vazio", needsValue: false },
+        { op: "empty", label: tr("op.empty"), needsValue: false },
+        { op: "not_empty", label: tr("op.notEmpty"), needsValue: false },
       ];
     case "checkbox":
       return [
-        { op: "checked", label: "marcado", needsValue: false },
-        { op: "unchecked", label: "desmarcado", needsValue: false },
+        { op: "checked", label: tr("op.checked"), needsValue: false },
+        { op: "unchecked", label: tr("op.unchecked"), needsValue: false },
       ];
     case "date":
       return [
-        { op: "eq", label: "é", needsValue: true },
-        { op: "gt", label: "depois de", needsValue: true },
-        { op: "lt", label: "antes de", needsValue: true },
-        { op: "empty", label: "está vazio", needsValue: false },
-        { op: "not_empty", label: "não está vazio", needsValue: false },
+        { op: "eq", label: tr("op.is"), needsValue: true },
+        { op: "gt", label: tr("op.after"), needsValue: true },
+        { op: "lt", label: tr("op.before"), needsValue: true },
+        { op: "empty", label: tr("op.empty"), needsValue: false },
+        { op: "not_empty", label: tr("op.notEmpty"), needsValue: false },
       ];
     case "select":
       return [
-        { op: "eq", label: "é", needsValue: true },
-        { op: "neq", label: "não é", needsValue: true },
-        { op: "empty", label: "está vazio", needsValue: false },
-        { op: "not_empty", label: "não está vazio", needsValue: false },
+        { op: "eq", label: tr("op.is"), needsValue: true },
+        { op: "neq", label: tr("op.isNot"), needsValue: true },
+        { op: "empty", label: tr("op.empty"), needsValue: false },
+        { op: "not_empty", label: tr("op.notEmpty"), needsValue: false },
       ];
     case "multi_select":
       return [
-        { op: "has", label: "contém", needsValue: true },
-        { op: "empty", label: "está vazio", needsValue: false },
-        { op: "not_empty", label: "não está vazio", needsValue: false },
+        { op: "has", label: tr("op.contains"), needsValue: true },
+        { op: "empty", label: tr("op.empty"), needsValue: false },
+        { op: "not_empty", label: tr("op.notEmpty"), needsValue: false },
       ];
     case "link":
     case "attachment":
       return [
-        { op: "empty", label: "está vazio", needsValue: false },
-        { op: "not_empty", label: "não está vazio", needsValue: false },
+        { op: "empty", label: tr("op.empty"), needsValue: false },
+        { op: "not_empty", label: tr("op.notEmpty"), needsValue: false },
       ];
     case "formula":
     case "lookup":
@@ -270,12 +277,12 @@ export function opsForType(t: FieldType): { op: FilterSpec["op"]; label: string;
       return [];
     default:
       return [
-        { op: "contains", label: "contém", needsValue: true },
-        { op: "not_contains", label: "não contém", needsValue: true },
-        { op: "eq", label: "é", needsValue: true },
-        { op: "neq", label: "não é", needsValue: true },
-        { op: "empty", label: "está vazio", needsValue: false },
-        { op: "not_empty", label: "não está vazio", needsValue: false },
+        { op: "contains", label: tr("op.contains"), needsValue: true },
+        { op: "not_contains", label: tr("op.notContains"), needsValue: true },
+        { op: "eq", label: tr("op.is"), needsValue: true },
+        { op: "neq", label: tr("op.isNot"), needsValue: true },
+        { op: "empty", label: tr("op.empty"), needsValue: false },
+        { op: "not_empty", label: tr("op.notEmpty"), needsValue: false },
       ];
   }
 }

@@ -8,6 +8,7 @@ import { inTauri } from "../lib/backend";
 import { backupsDir } from "../lib/extensions";
 import { useRemote } from "../lib/remote";
 import { backupKeep, dropRecent, readRecents, setBackupKeep, useStore } from "../state/store";
+import { t } from "../lib/i18n";
 
 export function StartScreen() {
   const store = useStore();
@@ -36,18 +37,18 @@ export function StartScreen() {
 
   const create = async () => {
     const path = await saveDialog({
-      title: "Criar base de dados",
-      defaultPath: "Minha base.tbase",
-      filters: [{ name: "Base LocalData", extensions: ["tbase"] }],
+      title: t("start.createTitle"),
+      defaultPath: t("start.createDefaultName"),
+      filters: [{ name: t("start.filterBase"), extensions: ["tbase"] }],
     });
     if (path) await store.createBase(path);
   };
 
   const openFile = async () => {
     const path = await openDialog({
-      title: "Abrir base de dados",
+      title: t("start.openTitle"),
       filters: [
-        { name: "Base LocalData", extensions: ["tbase"] },
+        { name: t("start.filterBase"), extensions: ["tbase"] },
         { name: "SQLite", extensions: ["db", "sqlite", "sqlite3"] },
       ],
       multiple: false,
@@ -60,34 +61,34 @@ export function StartScreen() {
       <div className="start-card">
         <div className="start-logo">◩</div>
         <h1>LocalData</h1>
-        <p className="muted">Banco de dados visual, 100% offline, com IA local.</p>
+        <p className="muted">{t("start.tagline")}</p>
         <div className="start-features">
-          <span className="feature-chip">▦ Grade</span>
-          <span className="feature-chip">▤ Kanban</span>
-          <span className="feature-chip">📅 Calendário</span>
-          <span className="feature-chip">🖼 Galeria</span>
-          <span className="feature-chip">📝 Formulário</span>
-          <span className="feature-chip">↗ Relações + lookup</span>
-          <span className="feature-chip">ƒx Fórmulas</span>
-          <span className="feature-chip">⇄ XLSX/CSV</span>
-          <span className="feature-chip">✦ IA local</span>
+          <span className="feature-chip">{t("start.feat.grid")}</span>
+          <span className="feature-chip">{t("start.feat.kanban")}</span>
+          <span className="feature-chip">{t("start.feat.calendar")}</span>
+          <span className="feature-chip">{t("start.feat.gallery")}</span>
+          <span className="feature-chip">{t("start.feat.form")}</span>
+          <span className="feature-chip">{t("start.feat.link")}</span>
+          <span className="feature-chip">{t("start.feat.formula")}</span>
+          <span className="feature-chip">{t("start.feat.io")}</span>
+          <span className="feature-chip">{t("start.feat.ai")}</span>
         </div>
-        {!tauri && <p className="hint warn">Rodando no navegador — abra pelo app desktop pra usar os dados.</p>}
+        {!tauri && <p className="hint warn">{t("start.browserWarn")}</p>}
         <div className="start-actions">
           <button className="btn primary big" disabled={!tauri} onClick={() => void create()}>
-            + Nova base
+            {t("start.newBase")}
           </button>
           <button className="btn big" disabled={!tauri} onClick={() => void openFile()}>
-            Abrir base…
+            {t("start.openBase")}
           </button>
           <button className="btn big" disabled={!tauri} onClick={() => setShowConnect(!showConnect)}>
-            🌐 Conectar a um servidor
+            {t("start.connect")}
           </button>
         </div>
 
         {showConnect && (
           <div className="connect-box">
-            <div className="form-label">Servidor (endereço e porta)</div>
+            <div className="form-label">{t("start.serverLabel")}</div>
             <input
               className="input input-sm"
               placeholder="192.168.0.10:8787"
@@ -97,14 +98,14 @@ export function StartScreen() {
             <div className="pop-row">
               <input
                 className="input input-sm"
-                placeholder="Usuário"
+                placeholder={t("start.user")}
                 value={srvUser}
                 onChange={(e) => setSrvUser(e.target.value)}
               />
               <input
                 className="input input-sm"
                 type="password"
-                placeholder="Senha"
+                placeholder={t("start.pass")}
                 value={srvPass}
                 onChange={(e) => setSrvPass(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && void connect()}
@@ -116,13 +117,13 @@ export function StartScreen() {
               disabled={remote.connecting || !srvUrl.trim() || !srvUser.trim()}
               onClick={() => void connect()}
             >
-              {remote.connecting ? "Conectando…" : "Conectar"}
+              {remote.connecting ? t("start.connecting") : t("start.connectBtn")}
             </button>
           </div>
         )}
         {recents.length > 0 && (
           <div className="start-recents">
-            <div className="form-label">Recentes</div>
+            <div className="form-label">{t("start.recents")}</div>
             {recents.map((p) => (
               <div key={p} className="recent-row">
                 <button className="recent-btn" title={p} onClick={() => void store.openBase(p)}>
@@ -131,7 +132,7 @@ export function StartScreen() {
                 </button>
                 <button
                   className="icon-btn"
-                  title="Remover dos recentes"
+                  title={t("start.removeRecent")}
                   onClick={() => {
                     dropRecent(p);
                     setRecents(readRecents());
@@ -145,7 +146,7 @@ export function StartScreen() {
         )}
         {tauri && (
           <div className="start-backup muted">
-            <span>Backup ao abrir: manter</span>
+            <span>{t("start.backupKeep")}</span>
             <select
               className="input input-sm"
               value={customKeep ? "custom" : String(keep)}
@@ -158,10 +159,10 @@ export function StartScreen() {
                 }
               }}
             >
-              <option value="0">nenhuma (desligado)</option>
-              <option value="10">10 cópias</option>
-              <option value="50">50 cópias</option>
-              <option value="custom">personalizado…</option>
+              <option value="0">{t("start.backupNone")}</option>
+              <option value="10">{t("start.backup10")}</option>
+              <option value="50">{t("start.backup50")}</option>
+              <option value="custom">{t("start.backupCustom")}</option>
             </select>
             {customKeep && (
               <input
@@ -173,14 +174,14 @@ export function StartScreen() {
             )}
             <button
               className="btn btn-sm"
-              title="Abrir a pasta onde os backups ficam"
+              title={t("start.backupFolderTitle")}
               onClick={() => void backupsDir().then(openPath).catch(() => {})}
             >
-              📂 Backups
+              {t("start.backups")}
             </button>
           </div>
         )}
-        <p className="start-foot muted">O arquivo .tbase é um SQLite comum — seus dados são seus.</p>
+        <p className="start-foot muted">{t("start.foot")}</p>
       </div>
     </div>
   );

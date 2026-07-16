@@ -8,6 +8,7 @@ import * as ai from "../lib/ai";
 import { inTauri } from "../lib/backend";
 import { activeTable, useStore } from "../state/store";
 import { invalidateLinkLabels } from "./cells";
+import { t } from "../lib/i18n";
 
 const K = {
   dir: "localdata.ai.dir",
@@ -64,7 +65,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
       const usable = found.filter((m) => !m.is_projector);
       setModels(usable);
       if (usable.length && !usable.some((m) => m.path === model)) setModel(usable[0].path);
-      if (!usable.length) setErr("nenhum .gguf encontrado nessa pasta");
+      if (!usable.length) setErr(t("ai.noGguf"));
     } catch (e) {
       setErr(String(e));
     }
@@ -76,7 +77,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
     try {
       const picked = await openDialog({
         directory: true,
-        title: "Escolher a pasta dos modelos GGUF",
+        title: t("ai.pickDirTitle"),
         defaultPath: dir || undefined,
       });
       if (typeof picked === "string" && picked) {
@@ -161,7 +162,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
           await store.refreshRows();
           setMsgs((cur) => [...cur, { role: "note", content: "✓ " + res.applied.join("; ") }]);
         } catch (e) {
-          setMsgs((cur) => [...cur, { role: "note", content: "⚠ operação rejeitada: " + (e instanceof Error ? e.message : e) }]);
+          setMsgs((cur) => [...cur, { role: "note", content: t("ai.opRejected") + (e instanceof Error ? e.message : e) }]);
           await store.refreshRows();
         }
       }
@@ -175,10 +176,10 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
   return (
     <aside className="ai-panel">
       <div className="ai-head">
-        <strong>✦ IA local</strong>
+        <strong>{t("ai.title")}</strong>
         <span className={"ai-dot " + phase} title={phase} />
         <span style={{ flex: 1 }} />
-        <button className="icon-btn" title="Configurar" onClick={() => setShowConfig(!showConfig)}>
+        <button className="icon-btn" title={t("ai.config")} onClick={() => setShowConfig(!showConfig)}>
           ⚙
         </button>
         <button className="icon-btn" onClick={onClose}>
@@ -188,7 +189,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
 
       {showConfig && (
         <div className="ai-config">
-          <label className="form-label">Pasta de modelos GGUF</label>
+          <label className="form-label">{t("ai.modelsFolder")}</label>
           <div className="pop-row">
             <input
               className="input input-sm"
@@ -197,16 +198,16 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
               onKeyDown={(e) => e.key === "Enter" && void scan()}
               placeholder="C:\modelos"
             />
-            <button className="btn btn-sm" title="Procurar pasta no gerenciador de arquivos" onClick={() => void pickDir()}>
-              📁 Procurar…
+            <button className="btn btn-sm" title={t("ai.browseTitle")} onClick={() => void pickDir()}>
+              {t("ai.browse")}
             </button>
-            <button className="btn btn-sm" title="Reescanear a pasta" onClick={() => void scan()}>
+            <button className="btn btn-sm" title={t("ai.rescan")} onClick={() => void scan()}>
               ⟳
             </button>
           </div>
           {models.length > 0 && (
             <>
-              <label className="form-label">Modelo</label>
+              <label className="form-label">{t("ai.model")}</label>
               <select className="input input-sm" value={model} onChange={(e) => setModel(e.target.value)}>
                 {models.map((m) => (
                   <option key={m.path} value={m.path}>
@@ -215,9 +216,9 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
                 ))}
               </select>
               <div className="pop-row">
-                <label className="form-label">GPU layers</label>
+                <label className="form-label">{t("ai.gpuLayers")}</label>
                 <input className="input input-sm w60" value={ngl} onChange={(e) => setNgl(e.target.value.replace(/\D/g, ""))} />
-                <label className="form-label">Contexto</label>
+                <label className="form-label">{t("ai.ctx")}</label>
                 <input className="input input-sm w80" value={ctx} onChange={(e) => setCtx(e.target.value.replace(/\D/g, ""))} />
               </div>
             </>
@@ -225,14 +226,14 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
           <div className="pop-row">
             {phase === "idle" || phase === "starting" ? (
               <button className="btn btn-sm primary" disabled={!model || phase === "starting"} onClick={() => void start()}>
-                {phase === "starting" ? "Carregando modelo…" : "Iniciar IA"}
+                {phase === "starting" ? t("ai.loadingModel") : t("ai.start")}
               </button>
             ) : (
               <button className="btn btn-sm" onClick={() => void stop()}>
-                Parar IA
+                {t("ai.stop")}
               </button>
             )}
-            {port > 0 && <span className="muted">porta {port}</span>}
+            {port > 0 && <span className="muted">{t("ai.port", { port })}</span>}
           </div>
         </div>
       )}
@@ -242,12 +243,12 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
       <div className="ai-body" ref={bodyRef}>
         {msgs.length === 0 && (
           <div className="ai-hello muted">
-            Peça coisas como:
+            {t("ai.helloHead")}
             <ul>
-              <li>"cria uma tabela de clientes com os campos certos"</li>
-              <li>"marca como Alta os registros atrasados"</li>
-              <li>"filtra preço maior que 100"</li>
-              <li>"quantos registros estão sem e-mail?"</li>
+              <li>{t("ai.hello1")}</li>
+              <li>{t("ai.hello2")}</li>
+              <li>{t("ai.hello3")}</li>
+              <li>{t("ai.hello4")}</li>
             </ul>
           </div>
         )}
@@ -262,7 +263,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
         <textarea
           className="input"
           rows={2}
-          placeholder={phase === "ready" || phase === "thinking" ? "Fale com seus dados…" : "Inicie a IA acima"}
+          placeholder={phase === "ready" || phase === "thinking" ? t("ai.inputReady") : t("ai.inputIdle")}
           value={input}
           disabled={phase !== "ready"}
           onChange={(e) => setInput(e.target.value)}

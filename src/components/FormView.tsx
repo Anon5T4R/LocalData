@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { activeTable, activeView, useStore } from "../state/store";
 import type { CellValue } from "../lib/types";
-import { FIELD_TYPE_LABEL, isComputed } from "../lib/types";
+import { fieldTypeLabel, isComputed } from "../lib/types";
 import { CellDisplay, CellEditor } from "./cells";
+import { t } from "../lib/i18n";
 
 export function FormView() {
   const store = useStore();
@@ -29,7 +30,7 @@ export function FormView() {
 
   const submit = async () => {
     if (missingRequired.length) {
-      store.setError(`Preencha os campos obrigatórios: ${missingRequired.map((f) => f.name).join(", ")}`);
+      store.setError(t("form.missingRequired", { fields: missingRequired.map((f) => f.name).join(", ") }));
       return;
     }
     const id = await store.addRecord(draft);
@@ -50,7 +51,7 @@ export function FormView() {
           <div key={f.id} className="record-field">
             <div className="record-field-label">
               {f.name}
-              {f.options.required && <span className="req-mark" title="Obrigatório"> *</span>}
+              {f.options.required && <span className="req-mark" title={t("form.requiredMark")}> *</span>}
             </div>
             <div
               className="record-field-value"
@@ -79,16 +80,16 @@ export function FormView() {
                 />
               )}
               {draft[f.id] == null && editing !== f.id && f.type !== "checkbox" && f.type !== "rating" && (
-                <span className="muted form-placeholder">{FIELD_TYPE_LABEL[f.type]}…</span>
+                <span className="muted form-placeholder">{t("form.placeholderSuffix", { label: fieldTypeLabel(f.type) })}</span>
               )}
             </div>
           </div>
         ))}
         <div className="modal-actions">
           <button className="btn primary" onClick={() => void submit()}>
-            Enviar
+            {t("form.submit")}
           </button>
-          {sent && <span className="sent-ok">✓ Registro criado</span>}
+          {sent && <span className="sent-ok">{t("form.created")}</span>}
         </div>
       </div>
     </div>

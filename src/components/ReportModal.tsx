@@ -6,6 +6,7 @@ import { useState } from "react";
 import { activeTable, activeView, useStore, visibleFields } from "../state/store";
 import { plainCellText } from "./cells";
 import type { Field, RecordRow } from "../lib/types";
+import { t, localeTag } from "../lib/i18n";
 
 export function ReportModal({ onClose }: { onClose: () => void }) {
   const store = useStore();
@@ -25,7 +26,7 @@ export function ReportModal({ onClose }: { onClose: () => void }) {
   if (groupField) {
     const map = new Map<string, RecordRow[]>();
     for (const r of rows) {
-      const label = plainCellText(groupField, r.cells[groupField.id] ?? null, tables) || "(vazio)";
+      const label = plainCellText(groupField, r.cells[groupField.id] ?? null, tables) || t("common.emptyValue");
       if (!map.has(label)) map.set(label, []);
       map.get(label)!.push(r);
     }
@@ -58,14 +59,14 @@ export function ReportModal({ onClose }: { onClose: () => void }) {
 
   const filterText =
     (view.config.filters ?? []).length > 0
-      ? `${(view.config.filters ?? []).length} filtro(s) aplicado(s)`
-      : "sem filtros";
+      ? t("rep.filtersApplied", { n: (view.config.filters ?? []).length })
+      : t("rep.noFilters");
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal report-modal">
         <div className="record-modal-head no-print">
-          <h3>Relatório — {table.name}</h3>
+          <h3>{t("rep.title", { name: table.name })}</h3>
           <button className="icon-btn" onClick={onClose}>
             ×
           </button>
@@ -73,17 +74,17 @@ export function ReportModal({ onClose }: { onClose: () => void }) {
         <div className="pop-row no-print">
           <input
             className="input input-sm"
-            placeholder="Título do relatório (opcional)"
+            placeholder={t("rep.titlePlaceholder")}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
           <button className="btn btn-sm primary" onClick={() => window.print()}>
-            🖨 Imprimir / salvar PDF
+            {t("rep.print")}
           </button>
         </div>
         <p className="muted no-print">
-          A janela de impressão do sistema permite "Salvar como PDF". {rows.length} de {store.total} registros
-          {rows.length < store.total ? " (carregando o restante…)" : ""}.
+          {t("rep.hint", { n: rows.length, total: store.total })}
+          {rows.length < store.total ? t("rep.hintLoading") : ""}.
         </p>
 
         <div className="report-sheet" id="report-sheet">
@@ -91,9 +92,9 @@ export function ReportModal({ onClose }: { onClose: () => void }) {
             <h1>{title || table.name}</h1>
             <div className="report-meta">
               <span>{store.schema?.name}</span>
-              <span>{new Date().toLocaleString("pt-BR")}</span>
+              <span>{new Date().toLocaleString(localeTag())}</span>
               <span>{filterText}</span>
-              <span>{store.total} registros</span>
+              <span>{t("rep.recordsSuffix", { n: store.total })}</span>
             </div>
           </div>
           <table className="report-table">
@@ -113,7 +114,7 @@ export function ReportModal({ onClose }: { onClose: () => void }) {
               <tfoot>
                 <tr>
                   {fields.map((f, i) => (
-                    <td key={f.id}>{i === 0 && !aggs[f.id] ? "Total geral" : aggFor(f, rows)}</td>
+                    <td key={f.id}>{i === 0 && !aggs[f.id] ? t("rep.grandTotal") : aggFor(f, rows)}</td>
                   ))}
                 </tr>
               </tfoot>

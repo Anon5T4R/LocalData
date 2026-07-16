@@ -3,6 +3,7 @@
 import { activeTable, activeView, useStore, visibleFields } from "../state/store";
 import { attachmentThumb, CellDisplay, useAttachments } from "./cells";
 import type { RecordRow } from "../lib/types";
+import { t } from "../lib/i18n";
 
 export function GalleryView() {
   const store = useStore();
@@ -22,13 +23,13 @@ export function GalleryView() {
     <div className="gallery-wrap">
       {attachmentFields.length > 0 && (
         <div className="gallery-bar">
-          <label>Capa:</label>
+          <label>{t("gal.cover")}</label>
           <select
             className="input input-sm"
             value={coverField?.id ?? ""}
             onChange={(e) => void store.patchViewConfig({ coverField: e.target.value || undefined })}
           >
-            <option value="">(sem capa)</option>
+            <option value="">{t("gal.noCover")}</option>
             {attachmentFields.map((f) => (
               <option key={f.id} value={f.id}>
                 {f.name}
@@ -61,7 +62,7 @@ export function GalleryView() {
           className="gallery-card gallery-add"
           onClick={() => void store.addRecord().then((id) => id != null && store.setOpenRecord(id))}
         >
-          + Novo registro
+          {t("common.newRecord")}
         </button>
       </div>
     </div>

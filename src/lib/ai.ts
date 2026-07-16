@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import * as api from "./backend";
 import type { BaseSchema, CellValue, Field, FieldType, FilterSpec, RecordRow, Table } from "./types";
 import { isComputed } from "./types";
+import { t as tr } from "./i18n";
 
 // --- Rust command wrappers (camelCase keys -> snake_case Rust params) ---
 
@@ -64,7 +65,7 @@ export async function streamChat(
     }),
     signal: opts.signal,
   });
-  if (!res.ok || !res.body) throw new Error(`a IA respondeu ${res.status}`);
+  if (!res.ok || !res.body) throw new Error(tr("ai.err.status", { status: res.status }));
 
   let inThink = false;
   const routeContent = (text: string) => {
@@ -151,21 +152,7 @@ export function rowsContext(table: Table, rows: RecordRow[], max = 20): string {
 }
 
 export const DATA_SYSTEM = (schema: string, activeTable: string, rows: string) =>
-  `Você é o assistente do LocalData, um banco de dados visual offline (estilo Airtable). ` +
-  `Schema da base:\n${schema}\n\nTabela ativa: "${activeTable}". Registros visíveis:\n${rows}\n\n` +
-  `Para MODIFICAR os dados, responda em duas partes: 1) uma frase curta do que vai fazer; ` +
-  `2) um bloco \`\`\`json com um ARRAY de operações. Operações disponíveis:\n` +
-  `- {"op":"createTable","name":"Clientes","fields":[{"name":"Nome","type":"text"},{"name":"Prioridade","type":"select","choices":["Alta","Baixa"]}]}\n` +
-  `- {"op":"createField","table":"Clientes","name":"Email","type":"text"}\n` +
-  `- {"op":"insert","table":"Clientes","rows":[{"Nome":"Ana","Prioridade":"Alta"}]}\n` +
-  `- {"op":"update","table":"Clientes","id":3,"set":{"Prioridade":"Baixa"}}  (use o id mostrado em [id N])\n` +
-  `- {"op":"setFilter","filters":[{"field":"Preço","op":"gt","value":100}]}  (ops: eq neq contains gt gte lt lte empty not_empty checked unchecked has)\n` +
-  `Tipos de campo: text, long_text, number, checkbox, date, select, multi_select, formula, rating, url, email, phone.\n` +
-  `Valores: número/rating como número JSON; checkbox true/false; data ISO "AAAA-MM-DD"; ` +
-  `url/email/phone como texto; select/multi_select pelo NOME da opção (novas opções são criadas automaticamente); ` +
-  `formula precisa de "expr" (ex.: {"name":"Total","type":"formula","expr":"{Preço} * {Qtd}"}).\n` +
-  `Faça exatamente o que foi pedido, da forma mais direta. ` +
-  `Para PERGUNTAS sobre os dados, responda só em texto, sem JSON.`;
+  tr("ai.sys.template", { schema, activeTable, rows });
 
 // ---------------------------------------------------------------------------
 // parse + validação + aplicação das operações
@@ -210,13 +197,13 @@ const newChoiceId = () => `ai${Date.now().toString(36)}${(aiChoiceSeq++).toStrin
 function findTable(schema: BaseSchema, name: unknown, fallback: Table): Table {
   if (typeof name !== "string" || !name.trim()) return fallback;
   const t = schema.tables.find((x) => x.name.trim().toLowerCase() === name.trim().toLowerCase());
-  if (!t) throw new Error(`tabela desconhecida: "${name}"`);
+  if (!t) throw new Error(tr("ai.err.unknownTable", { name }));
   return t;
 }
 
 function findField(table: Table, name: string): Field {
   const f = table.fields.find((x) => x.name.trim().toLowerCase() === name.trim().toLowerCase());
-  if (!f) throw new Error(`campo desconhecido em "${table.name}": "${name}"`);
+  if (!f) throw new Error(tr("ai.err.unknownField", { table: table.name, name }));
   return f;
 }
 
@@ -228,14 +215,14 @@ async function toCellValue(f: Field, v: unknown): Promise<CellValue> {
     case "number":
     case "rating": {
       const n = typeof v === "number" ? v : parseFloat(String(v).replace(",", "."));
-      if (isNaN(n)) throw new Error(`número inválido pra "${f.name}": ${JSON.stringify(v)}`);
+      if (isNaN(n)) throw new Error(tr("ai.err.badNumber", { field: f.name, value: JSON.stringify(v) }));
       return n;
     }
     case "checkbox":
       return v === true || v === 1 || String(v).toLowerCase() === "true";
     case "date": {
       const s = String(v);
-      if (!/^\d{4}-\d{2}-\d{2}/.test(s)) throw new Error(`data inválida pra "${f.name}" (use ISO): ${s}`);
+      if (!/^\d{4}-\d{2}-\d{2}/.test(s)) throw new Error(tr("ai.err.badDate", { field: f.name, value: s }));
       return s;
     }
     case "select": {
@@ -258,7 +245,7 @@ async function toCellValue(f: Field, v: unknown): Promise<CellValue> {
     case "phone":
       return typeof v === "string" ? v : JSON.stringify(v);
     default:
-      throw new Error(`a IA não pode escrever no campo "${f.name}" (${f.type})`);
+      throw new Error(tr("ai.err.cantWrite", { field: f.name, type: f.type }));
   }
 }
 
@@ -300,7 +287,7 @@ export async function applyOps(ops: AiOp[], schema: BaseSchema, active: Table): 
     switch (op.op) {
       case "createTable": {
         const name = String(op.name ?? "").trim();
-        if (!name) throw new Error("createTable sem nome");
+        if (!name) throw new Error(tr("ai.err.tableNoName"));
         const specs = Array.isArray(op.fields) ? op.fields : [];
         const tid = await api.tableCreate(name);
         // remove os campos default e cria os pedidos
@@ -312,7 +299,7 @@ export async function applyOps(ops: AiOp[], schema: BaseSchema, active: Table): 
           const fname = String((spec as Record<string, unknown>).name ?? "").trim();
           const ftype = String((spec as Record<string, unknown>).type ?? "text") as FieldType;
           if (!fname) continue;
-          if (!AI_FIELD_TYPES.includes(ftype)) throw new Error(`tipo inválido em createTable: ${ftype}`);
+          if (!AI_FIELD_TYPES.includes(ftype)) throw new Error(tr("ai.err.badTypeCreateTable", { type: ftype }));
           const options: Record<string, unknown> = {};
           const rawChoices = (spec as Record<string, unknown>).choices;
           if ((ftype === "select" || ftype === "multi_select") && Array.isArray(rawChoices)) {
@@ -324,7 +311,7 @@ export async function applyOps(ops: AiOp[], schema: BaseSchema, active: Table): 
         }
         if (created > 0) for (const fid of defaults) await api.fieldDelete(fid);
         await refreshLive();
-        applied.push(`tabela "${name}" criada com ${Math.max(created, 2)} campos`);
+        applied.push(tr("ai.applied.tableCreated", { name, n: Math.max(created, 2) }));
         schemaChanged = true;
         break;
       }
@@ -332,8 +319,8 @@ export async function applyOps(ops: AiOp[], schema: BaseSchema, active: Table): 
         const t = findTable(live, op.table, active);
         const fname = String(op.name ?? "").trim();
         const ftype = String(op.type ?? "text") as FieldType;
-        if (!fname) throw new Error("createField sem nome");
-        if (!AI_FIELD_TYPES.includes(ftype)) throw new Error(`tipo inválido: ${ftype}`);
+        if (!fname) throw new Error(tr("ai.err.fieldNoName"));
+        if (!AI_FIELD_TYPES.includes(ftype)) throw new Error(tr("ai.err.badType", { type: ftype }));
         const options: Record<string, unknown> = {};
         if ((ftype === "select" || ftype === "multi_select") && Array.isArray(op.choices)) {
           options.choices = (op.choices as unknown[]).map((c) => ({ id: newChoiceId(), name: String(c), color: "" }));
@@ -341,7 +328,7 @@ export async function applyOps(ops: AiOp[], schema: BaseSchema, active: Table): 
         if (ftype === "formula") options.expr = String(op.expr ?? "");
         await api.fieldCreate(t.id, fname, ftype, options);
         await refreshLive();
-        applied.push(`campo "${fname}" (${ftype}) criado em "${t.name}"`);
+        applied.push(tr("ai.applied.fieldCreated", { name: fname, type: ftype, table: t.name }));
         schemaChanged = true;
         break;
       }
@@ -359,22 +346,22 @@ export async function applyOps(ops: AiOp[], schema: BaseSchema, active: Table): 
           converted.push(cells);
         }
         if (converted.length) await api.recordsInsertBulk(t.id, converted);
-        applied.push(`${converted.length} registro(s) inserido(s) em "${t.name}"`);
+        applied.push(tr("ai.applied.inserted", { n: converted.length, table: t.name }));
         break;
       }
       case "update": {
         const t = findTable(live, op.table, active);
         const id = typeof op.id === "number" ? op.id : parseInt(String(op.id), 10);
-        if (isNaN(id)) throw new Error("update sem id numérico");
+        if (isNaN(id)) throw new Error(tr("ai.err.updateNoId"));
         const setSpec = op.set;
-        if (typeof setSpec !== "object" || setSpec == null) throw new Error("update sem 'set'");
+        if (typeof setSpec !== "object" || setSpec == null) throw new Error(tr("ai.err.updateNoSet"));
         const cells: Record<string, CellValue> = {};
         for (const [k, v] of Object.entries(setSpec as Record<string, unknown>)) {
           const f = findField(t, k);
           cells[f.id] = await toCellValue(f, v);
         }
         await api.recordsUpdate(t.id, [{ id, cells }]);
-        applied.push(`registro ${id} atualizado em "${t.name}"`);
+        applied.push(tr("ai.applied.updated", { id, table: t.name }));
         break;
       }
       case "setFilter": {
@@ -394,11 +381,11 @@ export async function applyOps(ops: AiOp[], schema: BaseSchema, active: Table): 
           out.push({ fieldId: f.id, op: fop, value });
         }
         filters = out;
-        applied.push(`filtro definido (${out.length} condição/ões)`);
+        applied.push(tr("ai.applied.filter", { n: out.length }));
         break;
       }
       default:
-        throw new Error(`operação desconhecida: "${op.op}"`);
+        throw new Error(tr("ai.err.unknownOp", { op: op.op }));
     }
   }
   return { applied, filters, schemaChanged };

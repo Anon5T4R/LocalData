@@ -5,9 +5,10 @@
 import { useEffect, useState } from "react";
 import { activeTable, useStore } from "../state/store";
 import type { CellValue, Field, RecordRow } from "../lib/types";
-import { FIELD_TYPE_ICON, FIELD_TYPE_LABEL, isComputed } from "../lib/types";
+import { FIELD_TYPE_ICON, fieldTypeLabel, isComputed } from "../lib/types";
 import { CellDisplay, CellEditor, invalidateLinkLabels } from "./cells";
 import { AuditList } from "./AuditPanel";
+import { t } from "../lib/i18n";
 
 export function RecordModal() {
   const store = useStore();
@@ -53,7 +54,7 @@ export function RecordModal() {
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div className="modal record-modal">
         <div className="record-modal-head">
-          <h3>{isNew ? "Novo registro" : `Registro #${row!.id}`}</h3>
+          <h3>{isNew ? t("rm.newRecord") : t("rm.recordN", { id: row!.id })}</h3>
           <button className="icon-btn" onClick={close}>
             ×
           </button>
@@ -63,7 +64,7 @@ export function RecordModal() {
             <div key={f.id} className="record-field">
               <div
                 className="record-field-label"
-                title={f.options.description ? `${FIELD_TYPE_LABEL[f.type]} — ${f.options.description}` : FIELD_TYPE_LABEL[f.type]}
+                title={f.options.description ? `${fieldTypeLabel(f.type)} — ${f.options.description}` : fieldTypeLabel(f.type)}
               >
                 <span className="ftype">{FIELD_TYPE_ICON[f.type]}</span> {f.name}
               </div>
@@ -100,7 +101,7 @@ export function RecordModal() {
         </div>
         {!isNew && showHistory && (
           <div className="record-history">
-            <div className="form-label">Histórico deste registro</div>
+            <div className="form-label">{t("rm.history")}</div>
             <AuditList tableId={table.id} recordId={row!.id} />
           </div>
         )}
@@ -109,33 +110,33 @@ export function RecordModal() {
             <button
               className="btn danger"
               onClick={() => {
-                if (confirm("Excluir este registro?")) {
+                if (confirm(t("rm.deleteConfirm"))) {
                   void store.deleteRecords([row!.id]);
                   close();
                 }
               }}
             >
-              Excluir
+              {t("common.delete")}
             </button>
           )}
           {!isNew && (
             <button className="btn" onClick={() => setShowHistory(!showHistory)}>
-              🕘 {showHistory ? "Ocultar" : "Histórico"}
+              {showHistory ? t("rm.hide") : t("rm.historyBtn")}
             </button>
           )}
           <span style={{ flex: 1 }} />
           {isNew ? (
             <>
               <button className="btn" onClick={close}>
-                Cancelar
+                {t("common.cancel")}
               </button>
               <button className="btn primary" onClick={() => void createNow()}>
-                Criar registro
+                {t("rm.create")}
               </button>
             </>
           ) : (
             <button className="btn" onClick={close}>
-              Fechar
+              {t("common.close")}
             </button>
           )}
         </div>

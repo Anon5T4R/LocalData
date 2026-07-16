@@ -337,6 +337,28 @@ body {
 .topbar .muted {
   color: rgba(255, 255, 255, 0.7);
 }
+.lang-select {
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.lang-select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.topbar .lang-select {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+.topbar .lang-select option {
+  color: var(--text);
+  background: var(--bg2);
+}
 .brand {
   display: flex;
   align-items: center;

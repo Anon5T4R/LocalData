@@ -4,8 +4,9 @@
 import { useState } from "react";
 import { activeTable, useStore } from "../state/store";
 import type { Choice, Field, FieldOptions, FieldType, NumberFormat, RollupAgg } from "../lib/types";
-import { CHOICE_COLORS, FIELD_TYPE_LABEL, ROLLUP_AGG_LABEL, isComputed } from "../lib/types";
+import { CHOICE_COLORS, FIELD_TYPES, ROLLUP_AGGS, fieldTypeLabel, rollupAggLabel, isComputed } from "../lib/types";
 import { useExtensions } from "../lib/extensions";
+import { t as tr } from "../lib/i18n";
 
 let choiceSeq = 0;
 function newChoiceId(): string {
@@ -126,12 +127,12 @@ export function FieldEditor({
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal field-editor">
-        <h3>{mode === "new" ? "Novo campo" : "Editar campo"}</h3>
+        <h3>{mode === "new" ? tr("fe.newField") : tr("fe.editField")}</h3>
 
-        <label className="form-label">Nome</label>
-        <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Nome do campo" />
+        <label className="form-label">{tr("common.name")}</label>
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder={tr("fe.namePlaceholder")} />
 
-        <label className="form-label">Tipo</label>
+        <label className="form-label">{tr("fe.type")}</label>
         <select
           className="input"
           value={type === "custom" ? `custom:${extTypeId}` : type}
@@ -145,45 +146,41 @@ export function FieldEditor({
             }
           }}
         >
-          {(Object.keys(FIELD_TYPE_LABEL) as FieldType[])
-            .filter((t) => t !== "custom")
-            .map((t) => (
-              <option key={t} value={t}>
-                {FIELD_TYPE_LABEL[t]}
-              </option>
-            ))}
+          {FIELD_TYPES.filter((t) => t !== "custom").map((t) => (
+            <option key={t} value={t}>
+              {fieldTypeLabel(t)}
+            </option>
+          ))}
           {(extTypes.length > 0 || orphanExt) && (
-            <optgroup label="Extensões (🧩)">
+            <optgroup label={tr("fe.extGroup")}>
               {extTypes.map((e) => (
                 <option key={e.id} value={`custom:${e.id}`}>
                   {e.icon ? `${e.icon} ` : ""}{e.name}
                 </option>
               ))}
               {orphanExt && (
-                <option value={`custom:${orphanExt}`}>⚠ {orphanExt} (extensão não carregada)</option>
+                <option value={`custom:${orphanExt}`}>{tr("fe.extNotLoadedOpt", { ext: orphanExt })}</option>
               )}
             </optgroup>
           )}
         </select>
         {type === "custom" && selectedExt?.description && <p className="hint">{selectedExt.description}</p>}
         {type === "custom" && !selectedExt && (
-          <p className="hint warn">
-            A extensão "{extTypeId}" não está carregada — os valores aparecem como texto simples até ela voltar.
-          </p>
+          <p className="hint warn">{tr("fe.extNotLoaded", { ext: extTypeId })}</p>
         )}
         {mode === "edit" && field && field.type !== type && (
-          <p className="hint warn">Os valores existentes serão convertidos quando possível; o que não converter fica vazio.</p>
+          <p className="hint warn">{tr("fe.convertWarn")}</p>
         )}
 
         {(type === "select" || type === "multi_select") && (
           <div className="choices-editor">
-            <label className="form-label">Opções</label>
+            <label className="form-label">{tr("fe.options")}</label>
             {choices.map((c, i) => (
               <div key={c.id} className="choice-row">
                 <span
                   className="choice-dot"
                   style={{ background: c.color || CHOICE_COLORS[i % CHOICE_COLORS.length] }}
-                  title="Trocar cor"
+                  title={tr("fe.changeColor")}
                   onClick={() => {
                     const cur = c.color || CHOICE_COLORS[i % CHOICE_COLORS.length];
                     const idx = CHOICE_COLORS.indexOf(cur);
@@ -196,7 +193,7 @@ export function FieldEditor({
                   value={c.name}
                   onChange={(e) => setChoices(choices.map((x) => (x.id === c.id ? { ...x, name: e.target.value } : x)))}
                 />
-                <button className="icon-btn" title="Remover" onClick={() => setChoices(choices.filter((x) => x.id !== c.id))}>
+                <button className="icon-btn" title={tr("common.remove")} onClick={() => setChoices(choices.filter((x) => x.id !== c.id))}>
                   ×
                 </button>
               </div>
@@ -204,17 +201,17 @@ export function FieldEditor({
             <button
               className="btn btn-sm"
               onClick={() =>
-                setChoices([...choices, { id: newChoiceId(), name: `Opção ${choices.length + 1}`, color: "" }])
+                setChoices([...choices, { id: newChoiceId(), name: tr("fe.optionDefault", { n: choices.length + 1 }), color: "" }])
               }
             >
-              + Adicionar opção
+              {tr("fe.addOption")}
             </button>
           </div>
         )}
 
         {type === "link" && (
           <>
-            <label className="form-label">Tabela relacionada</label>
+            <label className="form-label">{tr("fe.relatedTable")}</label>
             <select className="input" value={targetTable} onChange={(e) => setTargetTable(e.target.value)}>
               {tables.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -227,44 +224,41 @@ export function FieldEditor({
 
         {type === "formula" && (
           <>
-            <label className="form-label">Fórmula</label>
+            <label className="form-label">{tr("fe.formula")}</label>
             <textarea
               className="input"
               rows={3}
               value={expr}
               onChange={(e) => setExpr(e.target.value)}
-              placeholder={'ex.: IF({Preço} > 100, "caro", "barato")'}
+              placeholder={tr("fe.formulaPlaceholder")}
             />
-            <p className="hint">
-              Referencie campos com {"{Nome do Campo}"}. Operadores: + - * / % &amp; = != &gt; &lt;. Funções: IF, AND,
-              OR, NOT, CONCAT, UPPER, LOWER, TRIM, LEN, ROUND, ABS, MIN, MAX, TODAY, NOW, YEAR, MONTH, DAY, DAYS.
-            </p>
+            <p className="hint">{tr("fe.formulaHint")}</p>
           </>
         )}
 
         {type === "number" && (
           <>
-            <label className="form-label">Formato</label>
+            <label className="form-label">{tr("fe.numFormat")}</label>
             <select className="input" value={format} onChange={(e) => setFormat(e.target.value as NumberFormat)}>
-              <option value="decimal">Decimal</option>
-              <option value="integer">Inteiro</option>
-              <option value="currency">Moeda (R$)</option>
-              <option value="percent">Percentual (%)</option>
+              <option value="decimal">{tr("fe.fmtDecimal")}</option>
+              <option value="integer">{tr("fe.fmtInteger")}</option>
+              <option value="currency">{tr("fe.fmtCurrency")}</option>
+              <option value="percent">{tr("fe.fmtPercent")}</option>
             </select>
-            <label className="form-label">Casas decimais (vazio = automático)</label>
+            <label className="form-label">{tr("fe.decimals")}</label>
             <input
               className="input"
               inputMode="numeric"
               value={precision}
               onChange={(e) => setPrecision(e.target.value.replace(/\D/g, ""))}
-              placeholder="ex.: 2"
+              placeholder={tr("fe.decimalsPlaceholder")}
             />
           </>
         )}
 
         {type === "rating" && (
           <>
-            <label className="form-label">Máximo de estrelas (1–10)</label>
+            <label className="form-label">{tr("fe.ratingMax")}</label>
             <input
               className="input"
               inputMode="numeric"
@@ -277,10 +271,10 @@ export function FieldEditor({
 
         {(type === "lookup" || type === "rollup") &&
           (linkFields.length === 0 ? (
-            <p className="hint warn">Crie antes um campo de Relação nesta tabela — lookup/rollup buscam valores através dele.</p>
+            <p className="hint warn">{tr("fe.needLink")}</p>
           ) : (
             <>
-              <label className="form-label">Através da relação</label>
+              <label className="form-label">{tr("fe.viaLink")}</label>
               <select className="input" value={viaField?.id ?? ""} onChange={(e) => setLinkFieldId(e.target.value)}>
                 {linkFields.map((f) => (
                   <option key={f.id} value={f.id}>
@@ -288,7 +282,7 @@ export function FieldEditor({
                   </option>
                 ))}
               </select>
-              <label className="form-label">Campo da tabela relacionada</label>
+              <label className="form-label">{tr("fe.targetField")}</label>
               <select className="input" value={targetFieldId} onChange={(e) => setTargetFieldId(e.target.value)}>
                 {targetFields.map((f) => (
                   <option key={f.id} value={f.id}>
@@ -298,11 +292,11 @@ export function FieldEditor({
               </select>
               {type === "rollup" && (
                 <>
-                  <label className="form-label">Agregação</label>
+                  <label className="form-label">{tr("fe.agg")}</label>
                   <select className="input" value={agg} onChange={(e) => setAgg(e.target.value as RollupAgg)}>
-                    {(Object.keys(ROLLUP_AGG_LABEL) as RollupAgg[]).map((a) => (
+                    {ROLLUP_AGGS.map((a) => (
                       <option key={a} value={a}>
-                        {ROLLUP_AGG_LABEL[a]}
+                        {rollupAggLabel(a)}
                       </option>
                     ))}
                   </select>
@@ -314,36 +308,36 @@ export function FieldEditor({
         {type === "date" && (
           <label className="check-label">
             <input type="checkbox" checked={includeTime} onChange={(e) => setIncludeTime(e.target.checked)} />
-            Incluir hora
+            {tr("fe.includeTime")}
           </label>
         )}
 
         {type === "link" && (
           <>
-            <label className="form-label">Ao excluir um registro relacionado</label>
+            <label className="form-label">{tr("fe.onDelete")}</label>
             <select className="input" value={onDelete} onChange={(e) => setOnDelete(e.target.value as "restrict" | "unlink")}>
-              <option value="unlink">Desvincular (remove a referência)</option>
-              <option value="restrict">Impedir a exclusão (integridade)</option>
+              <option value="unlink">{tr("fe.unlink")}</option>
+              <option value="restrict">{tr("fe.restrict")}</option>
             </select>
           </>
         )}
 
         {canConstrain && (
           <div className="constraints-box">
-            <div className="form-label">Validação</div>
+            <div className="form-label">{tr("fe.validation")}</div>
             {canUnique && (
               <label className="check-label">
                 <input type="checkbox" checked={unique} onChange={(e) => setUnique(e.target.checked)} />
-                Valor único (não pode repetir)
+                {tr("fe.unique")}
               </label>
             )}
             <label className="check-label">
               <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />
-              Obrigatório no formulário
+              {tr("fe.required")}
             </label>
             {textLike && (
               <>
-                <label className="form-label">Formato exigido (regex, opcional)</label>
+                <label className="form-label">{tr("fe.regex")}</label>
                 <input
                   className="input"
                   value={regex}
@@ -354,7 +348,7 @@ export function FieldEditor({
             )}
             {(numberLike || type === "date") && (
               <div className="pop-row">
-                <label className="form-label">Mín</label>
+                <label className="form-label">{tr("fe.min")}</label>
                 <input
                   className="input input-sm w80"
                   type={type === "date" ? "date" : "text"}
@@ -362,7 +356,7 @@ export function FieldEditor({
                   value={cmin}
                   onChange={(e) => setCmin(e.target.value)}
                 />
-                <label className="form-label">Máx</label>
+                <label className="form-label">{tr("fe.max")}</label>
                 <input
                   className="input input-sm w80"
                   type={type === "date" ? "date" : "text"}
@@ -376,24 +370,24 @@ export function FieldEditor({
           </div>
         )}
 
-        <label className="form-label">Descrição (opcional, aparece como dica)</label>
+        <label className="form-label">{tr("fe.description")}</label>
         <input
           className="input"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="pra que serve este campo…"
+          placeholder={tr("fe.descPlaceholder")}
         />
 
         <div className="modal-actions">
           <button className="btn" onClick={onClose}>
-            Cancelar
+            {tr("common.cancel")}
           </button>
           <button
             className="btn primary"
             disabled={busy || !name.trim() || ((type === "lookup" || type === "rollup") && !viaField) || (type === "custom" && !extTypeId)}
             onClick={() => void save()}
           >
-            {mode === "new" ? "Criar campo" : "Salvar"}
+            {mode === "new" ? tr("fe.create") : tr("common.save")}
           </button>
         </div>
       </div>

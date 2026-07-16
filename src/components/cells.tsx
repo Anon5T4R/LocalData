@@ -20,6 +20,7 @@ import type { AttachmentMeta, CellValue, Choice, Field, RecordRow, Table } from 
 import { choiceColor } from "../lib/types";
 import { extTypeSpec } from "../lib/extensions";
 import { useStore } from "../state/store";
+import { t as tr, localeTag } from "../lib/i18n";
 
 // ---------------------------------------------------------------------------
 // caches de exibição (rótulos de relação e metadados/miniaturas de anexo)
@@ -66,7 +67,7 @@ export function useLinkLabels(targetTable: Table | undefined, ids: number[]): Ma
   const primary = targetTable?.fields[0];
   for (const [id, r] of rows) {
     if (!r) {
-      out.set(id, `#${id}? (removido)`);
+      out.set(id, tr("cells.removed", { id }));
       continue;
     }
     const v = primary ? r.cells[primary.id] : null;
@@ -135,9 +136,9 @@ export function formatNumber(v: number, opts?: { precision?: number; format?: st
   const precision = opts?.precision;
   switch (opts?.format) {
     case "integer":
-      return Math.round(v).toLocaleString("pt-BR");
+      return Math.round(v).toLocaleString(localeTag());
     case "currency":
-      return v.toLocaleString("pt-BR", {
+      return v.toLocaleString(localeTag(), {
         style: "currency",
         currency: "BRL",
         minimumFractionDigits: precision ?? 2,
@@ -338,7 +339,7 @@ export function CellDisplay({
     case "rollup": {
       const targetField = viaTable?.fields.find((f) => f.id === field.options.targetFieldId);
       if (!viaField || !viaTable || !targetField) {
-        return <span className="cell-config-warn">⚠ configurar campo</span>;
+        return <span className="cell-config-warn">{tr("cells.configField")}</span>;
       }
       const values = viaIds.map((id) => viaRows.get(id)?.cells[targetField.id] ?? null);
       if (field.type === "rollup") {
@@ -364,7 +365,7 @@ export function CellDisplay({
         /* extensão quebrada não derruba a célula: mostra o valor cru */
       }
       return (
-        <span style={color ? { color } : undefined} title={ext ? undefined : `extensão "${field.options.extType}" não carregada`}>
+        <span style={color ? { color } : undefined} title={ext ? undefined : tr("cells.extNotLoaded", { ext: field.options.extType ?? "" })}>
           {text}
         </span>
       );
@@ -682,17 +683,17 @@ function SelectEditor({
       ))}
       {!multi && (
         <div className="cell-pop-item" onClick={() => commit(null)}>
-          <span className="muted">(limpar)</span>
+          <span className="muted">{tr("cells.clear")}</span>
         </div>
       )}
       {multi && (
         <div className="cell-pop-actions">
           <button className="btn btn-sm" onClick={() => commit(Array.from(sel))}>
-            OK
+            {tr("common.ok")}
           </button>
         </div>
       )}
-      {!choices.length && <div className="cell-pop-item muted">Sem opções — edite o campo</div>}
+      {!choices.length && <div className="cell-pop-item muted">{tr("cells.noOptions")}</div>}
     </div>
   );
 }
@@ -732,7 +733,7 @@ function LinkEditor({
   if (!target) {
     return (
       <div ref={ref} className="cell-pop">
-        <div className="cell-pop-item muted">Tabela alvo não existe mais</div>
+        <div className="cell-pop-item muted">{tr("cells.targetGone")}</div>
       </div>
     );
   }
@@ -745,7 +746,7 @@ function LinkEditor({
     <div ref={ref} className="cell-pop cell-pop-wide">
       <input
         className="cell-input"
-        placeholder={`Buscar em ${target.name}…`}
+        placeholder={tr("cells.searchIn", { name: target.name })}
         value={q}
         onChange={(e) => setQ(e.target.value)}
         onKeyDown={(e) => e.key === "Escape" && cancel()}
@@ -764,10 +765,10 @@ function LinkEditor({
           </div>
         );
       })}
-      {!cands.length && <div className="cell-pop-item muted">Nenhum registro</div>}
+      {!cands.length && <div className="cell-pop-item muted">{tr("cells.noRecords")}</div>}
       <div className="cell-pop-actions">
         <button className="btn btn-sm" onClick={() => commit(sel)}>
-          OK
+          {tr("common.ok")}
         </button>
       </div>
     </div>
@@ -789,7 +790,7 @@ function AttachmentEditor({
   useOutsideClick(ref, () => commit(ids));
   const addFiles = async () => {
     try {
-      const picked = await openDialog({ multiple: true, title: "Anexar arquivos" });
+      const picked = await openDialog({ multiple: true, title: tr("cells.attachTitle") });
       if (!picked) return;
       const paths = Array.isArray(picked) ? picked : [picked];
       const added = await api.attachmentImport(paths as string[]);
@@ -805,20 +806,20 @@ function AttachmentEditor({
           <span className="chip chip-att" title={m.name}>
             📎 {m.name}
           </span>
-          <button className="icon-btn" title="Remover" onClick={() => setIds(ids.filter((i) => i !== m.id))}>
+          <button className="icon-btn" title={tr("common.remove")} onClick={() => setIds(ids.filter((i) => i !== m.id))}>
             ×
           </button>
         </div>
       ))}
       <div className="cell-pop-actions">
         <button className="btn btn-sm" onClick={addFiles}>
-          + Anexar arquivo
+          {tr("cells.addAttachment")}
         </button>
         <button className="btn btn-sm primary" onClick={() => commit(ids)}>
-          OK
+          {tr("common.ok")}
         </button>
         <button className="btn btn-sm" onClick={cancel}>
-          Cancelar
+          {tr("common.cancel")}
         </button>
       </div>
     </div>

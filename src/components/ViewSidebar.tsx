@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { activeTable, useStore } from "../state/store";
 import type { ViewKind } from "../lib/types";
 import { useOutsideClick } from "./cells";
+import { t } from "../lib/i18n";
 
 const KIND_ICON: Record<ViewKind, string> = {
   grid: "▦",
@@ -13,13 +14,8 @@ const KIND_ICON: Record<ViewKind, string> = {
   form: "📝",
 };
 
-const KIND_LABEL: Record<ViewKind, string> = {
-  grid: "Grade",
-  kanban: "Kanban",
-  calendar: "Calendário",
-  gallery: "Galeria",
-  form: "Formulário",
-};
+const KINDS: ViewKind[] = ["grid", "kanban", "calendar", "gallery", "form"];
+const kindLabel = (k: ViewKind) => t(`view.${k}`);
 
 export function ViewSidebar() {
   const store = useStore();
@@ -35,7 +31,7 @@ export function ViewSidebar() {
 
   return (
     <aside className="view-sidebar">
-      <div className="view-sidebar-head">Views</div>
+      <div className="view-sidebar-head">{t("vs.head")}</div>
       {table.views.map((v) => (
         <div key={v.id} className={"view-item" + (v.id === store.activeViewId ? " active" : "")}>
           <button className="view-item-btn" onClick={() => store.setActiveView(v.id)}>
@@ -51,11 +47,11 @@ export function ViewSidebar() {
                 className="menu-item"
                 onClick={() => {
                   setMenuFor(null);
-                  const name = prompt("Novo nome da view:", v.name);
+                  const name = prompt(t("vs.renamePrompt"), v.name);
                   if (name?.trim()) void store.renameView(v.id, name.trim());
                 }}
               >
-                ✏️ Renomear
+                {t("vs.rename")}
               </button>
               <button
                 className="menu-item"
@@ -64,17 +60,17 @@ export function ViewSidebar() {
                   void store.duplicateView(v.id);
                 }}
               >
-                ⧉ Duplicar
+                {t("vs.duplicate")}
               </button>
               {table.views.length > 1 && (
                 <button
                   className="menu-item danger"
                   onClick={() => {
                     setMenuFor(null);
-                    if (confirm(`Excluir a view "${v.name}"?`)) void store.deleteView(v.id);
+                    if (confirm(t("vs.deleteConfirm", { name: v.name }))) void store.deleteView(v.id);
                   }}
                 >
-                  🗑 Excluir
+                  {t("vs.delete")}
                 </button>
               )}
             </div>
@@ -83,20 +79,20 @@ export function ViewSidebar() {
       ))}
       <div className="view-add" ref={addRef}>
         <button className="btn btn-sm" onClick={() => setAdding(!adding)}>
-          + Nova view
+          {t("vs.newView")}
         </button>
         {adding && (
           <div className="menu">
-            {(Object.keys(KIND_LABEL) as ViewKind[]).map((k) => (
+            {KINDS.map((k) => (
               <button
                 key={k}
                 className="menu-item"
                 onClick={() => {
                   setAdding(false);
-                  void store.addView(KIND_LABEL[k], k, {});
+                  void store.addView(kindLabel(k), k, {});
                 }}
               >
-                {KIND_ICON[k]} {KIND_LABEL[k]}
+                {KIND_ICON[k]} {kindLabel(k)}
               </button>
             ))}
           </div>

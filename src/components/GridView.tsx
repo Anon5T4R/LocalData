@@ -11,6 +11,7 @@ import { FIELD_TYPE_ICON, choiceColor, isComputed } from "../lib/types";
 import { CellDisplay, CellEditor, formatNumber, invalidateLinkLabels, plainCellText, useOutsideClick } from "./cells";
 import { missingChoiceNames, newChoiceId, parseTsv, textToCell, toTsv } from "../lib/clipboard";
 import { FieldEditor } from "./FieldEditor";
+import { t as tr, localeTag } from "../lib/i18n";
 
 const ROW_H = 36;
 const GROUP_H = 34;
@@ -41,11 +42,11 @@ function groupOf(f: Field, r: RecordRow): { key: string; label: string; color?: 
       const c = f.options.choices![idx];
       return { key: c.id, label: c.name, color: choiceColor(c, idx) };
     }
-    return { key: "", label: "(vazio)" };
+    return { key: "", label: tr("common.emptyValue") };
   }
-  if (f.type === "checkbox") return v ? { key: "1", label: "Marcado" } : { key: "0", label: "Desmarcado" };
+  if (f.type === "checkbox") return v ? { key: "1", label: tr("grid.checkedLabel") } : { key: "0", label: tr("grid.uncheckedLabel") };
   const s = plainCellText(f, v ?? null, []);
-  return s ? { key: s, label: s } : { key: "", label: "(vazio)" };
+  return s ? { key: s, label: s } : { key: "", label: tr("common.emptyValue") };
 }
 
 export function GridView() {
@@ -118,7 +119,7 @@ export function GridView() {
     } else if (groupField.type === "number" || groupField.type === "rating") {
       keys.sort((a, b) => parseFloat(a.replace(",", ".")) - parseFloat(b.replace(",", ".")));
     } else {
-      keys.sort((a, b) => a.localeCompare(b, "pt-BR"));
+      keys.sort((a, b) => a.localeCompare(b, localeTag()));
     }
     keys = [...keys.filter((k) => k !== ""), ...keys.filter((k) => k === "")];
 
@@ -491,9 +492,9 @@ export function GridView() {
 
   const aggValue = (f: Field, kind: AggKind): string => {
     const raw = aggData[`${f.id}:${kind}`];
-    if (kind === "filled") return `Preench. ${raw ?? 0}`;
+    if (kind === "filled") return tr("grid.aggFilled", { n: raw ?? 0 });
     if (raw == null) return "—";
-    const label = { sum: "Soma", avg: "Média", min: "Mín", max: "Máx" }[kind];
+    const label = { sum: tr("grid.aggSum"), avg: tr("grid.aggAvg"), min: tr("grid.aggMin"), max: tr("grid.aggMax") }[kind];
     return `${label} ${formatNumber(Math.round(raw * 1e6) / 1e6, f.options)}`;
   };
   const rect = selRect();
@@ -575,7 +576,7 @@ export function GridView() {
                         setFieldEditor({ mode: "edit", field: f });
                       }}
                     >
-                      ✏️ Editar campo
+                      {tr("grid.editField")}
                     </button>
                     <button
                       className="menu-item"
@@ -584,15 +585,15 @@ export function GridView() {
                         void store.duplicateField(f.id);
                       }}
                     >
-                      ⧉ Duplicar campo
+                      {tr("grid.dupField")}
                     </button>
                     {!isComputed(f.type) && (
                       <>
                         <button className="menu-item" onClick={() => sortBy(f.id, false)}>
-                          ↑ Ordenar crescente
+                          {tr("grid.sortAsc")}
                         </button>
                         <button className="menu-item" onClick={() => sortBy(f.id, true)}>
-                          ↓ Ordenar decrescente
+                          {tr("grid.sortDesc")}
                         </button>
                       </>
                     )}
@@ -606,12 +607,12 @@ export function GridView() {
                           });
                         }}
                       >
-                        {view.config.groupField === f.id ? "▤ Desagrupar" : "▤ Agrupar por este campo"}
+                        {view.config.groupField === f.id ? tr("grid.ungroup") : tr("grid.groupByThis")}
                       </button>
                     )}
                     {i !== 0 && (
                       <button className="menu-item" onClick={() => hideField(f.id)}>
-                        🙈 Ocultar campo
+                        {tr("grid.hideField")}
                       </button>
                     )}
                     {table.fields.length > 1 && (
@@ -619,12 +620,12 @@ export function GridView() {
                         className="menu-item danger"
                         onClick={() => {
                           setHeaderMenu(null);
-                          if (confirm(`Excluir o campo "${f.name}" e todos os seus dados?`)) {
+                          if (confirm(tr("grid.deleteFieldConfirm", { name: f.name }))) {
                             void store.deleteField(f.id);
                           }
                         }}
                       >
-                        🗑 Excluir campo
+                        {tr("grid.deleteField")}
                       </button>
                     )}
                   </div>
@@ -632,7 +633,7 @@ export function GridView() {
               </div>
             ))}
             <div className="grid-th grid-th-add" style={{ width: 40 }}>
-              <button className="grid-th-btn" title="Novo campo" onClick={() => setFieldEditor({ mode: "new" })}>
+              <button className="grid-th-btn" title={tr("grid.newField")} onClick={() => setFieldEditor({ mode: "new" })}>
                 +
               </button>
             </div>
@@ -691,7 +692,7 @@ export function GridView() {
                       }}
                     />
                     <span className="rowno">{rowIdx + 1}</span>
-                    <button className="expand" title="Abrir registro" onClick={() => store.setOpenRecord(r.id)}>
+                    <button className="expand" title={tr("grid.openRecord")} onClick={() => store.setOpenRecord(r.id)}>
                       ⤢
                     </button>
                   </div>
@@ -758,15 +759,15 @@ export function GridView() {
           {rows.length === 0 && !store.loading && (
             <div className="grid-empty muted">
               {store.search || (view.config.filters ?? []).length
-                ? "Nenhum registro bate com a busca/filtros."
-                : "Tabela vazia — crie o primeiro registro abaixo ou cole dados do Excel (Ctrl+V)."}
+                ? tr("grid.emptyFiltered")
+                : tr("grid.emptyTable")}
             </div>
           )}
           <button className="grid-addrow" style={{ width: Math.max(totalW, 300) }} onClick={() => void store.addRecord()}>
-            + Novo registro
+            {tr("common.newRecord")}
           </button>
           {rows.length < store.total && (
-            <div className="grid-loading muted">carregando {rows.length} de {store.total}…</div>
+            <div className="grid-loading muted">{tr("grid.loadingMore", { n: rows.length, total: store.total })}</div>
           )}
 
           {/* rodapé de agregação (sticky) */}
@@ -781,7 +782,7 @@ export function GridView() {
                   key={f.id}
                   className={"grid-footer-cell agg" + (kind ? " on" : "")}
                   style={{ width: colW(f, i) }}
-                  title="Agregação da coluna (clique pra alternar)"
+                  title={tr("grid.aggTitle")}
                   onClick={() => cycleAgg(f)}
                 >
                   {kind ? aggValue(f, kind) : "+"}
@@ -797,21 +798,21 @@ export function GridView() {
       {selected.size > 0 && (
         <div className="selbar">
           <span>
-            {selected.size} selecionado{selected.size > 1 ? "s" : ""}
+            {tr(selected.size > 1 ? "grid.selectedMany" : "grid.selectedOne", { n: selected.size })}
           </span>
           <button
             className="btn danger"
             onClick={() => {
-              if (confirm(`Excluir ${selected.size} registro(s)?`)) {
+              if (confirm(tr("grid.deleteRecordsConfirm", { n: selected.size }))) {
                 void store.deleteRecords(Array.from(selected));
                 setSelected(new Set());
               }
             }}
           >
-            Excluir
+            {tr("common.delete")}
           </button>
           <button className="btn" onClick={() => setSelected(new Set())}>
-            Limpar seleção
+            {tr("grid.clearSel")}
           </button>
         </div>
       )}
@@ -826,7 +827,7 @@ export function GridView() {
               setCtxMenu(null);
             }}
           >
-            ⤢ Abrir registro
+            {tr("grid.ctxOpen")}
           </button>
           <button
             className="menu-item"
@@ -835,7 +836,7 @@ export function GridView() {
               setCtxMenu(null);
             }}
           >
-            ⧉ Duplicar
+            {tr("grid.ctxDup")}
           </button>
           <button
             className="menu-item danger"
@@ -844,7 +845,7 @@ export function GridView() {
               setCtxMenu(null);
             }}
           >
-            🗑 Excluir
+            {tr("grid.ctxDelete")}
           </button>
         </div>
       )}

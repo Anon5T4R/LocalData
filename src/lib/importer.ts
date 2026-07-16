@@ -7,6 +7,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import * as XLSX from "xlsx";
 import * as api from "./backend";
 import type { CellValue, Field, FieldType, RecordRow, Table } from "./types";
+import { t as tr } from "./i18n";
 
 const readFileB64 = (path: string) => invoke<string>("read_file_base64", { path });
 const writeFileB64 = (path: string, base64Data: string) => invoke<void>("write_file_base64", { path, base64Data });
@@ -69,8 +70,8 @@ interface StoreLike {
 export async function importFile(store: StoreLike): Promise<void> {
   try {
     const picked = await openDialog({
-      title: "Importar planilha",
-      filters: [{ name: "Planilhas", extensions: ["csv", "xlsx", "xls"] }],
+      title: tr("im.dialogTitle"),
+      filters: [{ name: tr("im.filterSheets"), extensions: ["csv", "xlsx", "xls"] }],
       multiple: false,
     });
     if (!picked || Array.isArray(picked)) return;
@@ -78,16 +79,16 @@ export async function importFile(store: StoreLike): Promise<void> {
     const wb = XLSX.read(b64, { type: "base64", raw: false });
     const ws = wb.Sheets[wb.SheetNames[0]];
     const grid: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
-    if (!grid.length) throw new Error("arquivo vazio");
+    if (!grid.length) throw new Error(tr("im.emptyFile"));
 
-    const headers = grid[0].map((h, i) => String(h).trim() || `Coluna ${i + 1}`);
+    const headers = grid[0].map((h, i) => String(h).trim() || tr("im.colDefault", { n: i + 1 }));
     const body = grid.slice(1).filter((row) => row.some((c) => String(c).trim() !== ""));
 
     // inferir tipo por coluna
     const types: FieldType[] = headers.map((_, c) => inferType(body.map((row) => String(row[c] ?? ""))));
 
     // nome da tabela = nome do arquivo
-    const fname = picked.replace(/\\/g, "/").split("/").pop() ?? "Importada";
+    const fname = picked.replace(/\\/g, "/").split("/").pop() ?? tr("im.importedTable");
     const tableName = fname.replace(/\.(csv|xlsx|xls)$/i, "");
 
     const tableId = await api.tableCreate(tableName);
@@ -152,8 +153,8 @@ export interface SheetData {
 /** Abre o diálogo, lê e faz o parse da planilha (sem tocar na base). */
 export async function pickSheet(): Promise<SheetData | null> {
   const picked = await openDialog({
-    title: "Importar planilha",
-    filters: [{ name: "Planilhas", extensions: ["csv", "xlsx", "xls"] }],
+    title: tr("im.dialogTitle"),
+    filters: [{ name: tr("im.filterSheets"), extensions: ["csv", "xlsx", "xls"] }],
     multiple: false,
   });
   if (!picked || Array.isArray(picked)) return null;
@@ -161,8 +162,8 @@ export async function pickSheet(): Promise<SheetData | null> {
   const wb = XLSX.read(b64, { type: "base64", raw: false });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const grid: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
-  if (!grid.length) throw new Error("arquivo vazio");
-  const headers = grid[0].map((h, i) => String(h).trim() || `Coluna ${i + 1}`);
+  if (!grid.length) throw new Error(tr("im.emptyFile"));
+  const headers = grid[0].map((h, i) => String(h).trim() || tr("im.colDefault", { n: i + 1 }));
   const body = grid.slice(1).filter((row) => row.some((c) => String(c).trim() !== ""));
   return { path: picked, headers, body };
 }
@@ -200,9 +201,9 @@ export async function upsertImport(
   // cabeçalho → campo da tabela
   const colField = sheet.headers.map((h) => table.fields.find((f) => norm(f.name) === norm(h)));
   const keyField = table.fields.find((f) => f.id === keyFieldId);
-  if (!keyField) throw new Error("campo-chave inválido");
+  if (!keyField) throw new Error(tr("im.badKey"));
   const keyCol = colField.findIndex((f) => f?.id === keyFieldId);
-  if (keyCol < 0) throw new Error(`a planilha não tem uma coluna chamada "${keyField.name}" pra casar`);
+  if (keyCol < 0) throw new Error(tr("im.noKeyColumn", { name: keyField.name }));
 
   // índice das linhas existentes por valor-chave (texto exibido, normalizado)
   const existing = await fetchAllRows(table.id);
@@ -282,7 +283,7 @@ export async function upsertImport(
 
 export async function exportTable(table: Table, rows: RecordRow[], format: "xlsx" | "csv"): Promise<void> {
   const path = await saveDialog({
-    title: "Exportar tabela",
+    title: tr("im.exportDialog"),
     defaultPath: `${table.name}.${format}`,
     filters: [{ name: format.toUpperCase(), extensions: [format] }],
   });
@@ -293,7 +294,7 @@ export async function exportTable(table: Table, rows: RecordRow[], format: "xlsx
   const data = rows.map((r) => fields.map((f) => displayValue(f, r)));
   const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, table.name.slice(0, 31) || "Dados");
+  XLSX.utils.book_append_sheet(wb, ws, table.name.slice(0, 31) || tr("im.sheetName"));
   const b64 = XLSX.write(wb, { bookType: format, type: "base64" });
   await writeFileB64(path, b64);
 }

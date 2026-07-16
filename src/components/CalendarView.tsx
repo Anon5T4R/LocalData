@@ -2,22 +2,11 @@
 
 import { useState } from "react";
 import { activeTable, activeView, useStore } from "../state/store";
+import { t, type MessageKey } from "../lib/i18n";
 
-const WEEKDAYS = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
-const MONTHS = [
-  "janeiro",
-  "fevereiro",
-  "março",
-  "abril",
-  "maio",
-  "junho",
-  "julho",
-  "agosto",
-  "setembro",
-  "outubro",
-  "novembro",
-  "dezembro",
-];
+const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
+const monthName = (m: number) => t(`cal.mon${m}` as MessageKey);
+const weekdayName = (i: number) => t(`cal.wd${i}` as MessageKey);
 
 function iso(y: number, m: number, d: number): string {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -39,14 +28,14 @@ export function CalendarView() {
   if (!dateField) {
     return (
       <div className="view-setup">
-        <p>O calendário posiciona os registros por um campo de data.</p>
+        <p>{t("cal.hint")}</p>
         {dateFields.length ? (
           <select
             className="input"
             value=""
             onChange={(e) => e.target.value && void store.patchViewConfig({ dateField: e.target.value })}
           >
-            <option value="">Escolher campo…</option>
+            <option value="">{t("common.chooseField")}</option>
             {dateFields.map((f) => (
               <option key={f.id} value={f.id}>
                 {f.name}
@@ -54,7 +43,7 @@ export function CalendarView() {
             ))}
           </select>
         ) : (
-          <p className="muted">Crie um campo do tipo "Data" primeiro.</p>
+          <p className="muted">{t("cal.needDate")}</p>
         )}
       </div>
     );
@@ -87,20 +76,18 @@ export function CalendarView() {
         <button className="btn" onClick={() => setYm(ym.m === 0 ? { y: ym.y - 1, m: 11 } : { y: ym.y, m: ym.m - 1 })}>
           ←
         </button>
-        <h3>
-          {MONTHS[ym.m]} de {ym.y}
-        </h3>
+        <h3>{t("cal.monthYear", { month: monthName(ym.m), year: ym.y })}</h3>
         <button className="btn" onClick={() => setYm(ym.m === 11 ? { y: ym.y + 1, m: 0 } : { y: ym.y, m: ym.m + 1 })}>
           →
         </button>
         <button className="btn" onClick={() => setYm({ y: now.getFullYear(), m: now.getMonth() })}>
-          Hoje
+          {t("cal.today")}
         </button>
       </div>
       <div className="calendar-grid">
-        {WEEKDAYS.map((w) => (
-          <div key={w} className="calendar-wd">
-            {w}
+        {WEEKDAYS.map((i) => (
+          <div key={i} className="calendar-wd">
+            {weekdayName(i)}
           </div>
         ))}
         {cells.map((d, i) => {
@@ -114,7 +101,7 @@ export function CalendarView() {
                     <span>{d}</span>
                     <button
                       className="calendar-add"
-                      title="Novo registro neste dia"
+                      title={t("cal.addDay")}
                       onClick={() => {
                         void store
                           .addRecord({ [dateField.id]: dayIso })

@@ -12,6 +12,7 @@ import { ImportModal } from "./ImportModal";
 import { ReportModal } from "./ReportModal";
 import { AutomationsPanel } from "./AutomationsPanel";
 import { isRemote } from "../lib/remote";
+import { t } from "../lib/i18n";
 
 type Pop = "filters" | "sorts" | "fields" | "group" | "io" | null;
 
@@ -43,26 +44,26 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
   return (
     <div className="toolbar">
       <button className="btn primary" onClick={() => store.setOpenRecord("new")}>
-        + Novo registro
+        {t("common.newRecord")}
       </button>
 
       <div className="toolbar-pops" ref={pop ? popRef : undefined}>
         <button className={"btn" + (filters.length ? " active" : "")} onClick={() => setPop(pop === "filters" ? null : "filters")}>
-          ⧩ Filtros{filters.length ? ` (${filters.length})` : ""}
+          {t("tbar.filters")}{filters.length ? ` (${filters.length})` : ""}
         </button>
         <button className={"btn" + (sorts.length ? " active" : "")} onClick={() => setPop(pop === "sorts" ? null : "sorts")}>
-          ⇅ Ordenar{sorts.length ? ` (${sorts.length})` : ""}
+          {t("tbar.sorts")}{sorts.length ? ` (${sorts.length})` : ""}
         </button>
         <button className={"btn" + (hidden.length ? " active" : "")} onClick={() => setPop(pop === "fields" ? null : "fields")}>
-          👁 Campos{hidden.length ? ` (${hidden.length} ocultos)` : ""}
+          {t("tbar.fields")}{hidden.length ? ` (${t("tbar.fieldsHidden", { n: hidden.length })})` : ""}
         </button>
         {isGrid && (
           <button className={"btn" + (grouped || view.config.colorField ? " active" : "")} onClick={() => setPop(pop === "group" ? null : "group")}>
-            ▤ Agrupar/Cor
+            {t("tbar.group")}
           </button>
         )}
         <button className="btn" onClick={() => setPop(pop === "io" ? null : "io")}>
-          ⇄ Importar/Exportar
+          {t("tbar.io")}
         </button>
 
         {pop === "filters" && (
@@ -137,7 +138,7 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
                 setFilters([...filters, { fieldId: f.id, op: opsForType(f.type)[0].op, value: "" }]);
               }}
             >
-              + Adicionar filtro
+              {t("tbar.addFilter")}
             </button>
           </div>
         )}
@@ -162,8 +163,8 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
                   value={s.desc ? "desc" : "asc"}
                   onChange={(e) => setSorts(sorts.map((x, j) => (j === i ? { ...x, desc: e.target.value === "desc" } : x)))}
                 >
-                  <option value="asc">crescente</option>
-                  <option value="desc">decrescente</option>
+                  <option value="asc">{t("tbar.asc")}</option>
+                  <option value="desc">{t("tbar.desc")}</option>
                 </select>
                 <button className="icon-btn" onClick={() => setSorts(sorts.filter((_, j) => j !== i))}>
                   ×
@@ -174,7 +175,7 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
               className="btn btn-sm"
               onClick={() => filterableFields[0] && setSorts([...sorts, { fieldId: filterableFields[0].id, desc: false }])}
             >
-              + Adicionar ordenação
+              {t("tbar.addSort")}
             </button>
           </div>
         )}
@@ -201,27 +202,27 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
 
         {pop === "group" && (
           <div className="pop">
-            <label className="form-label">Agrupar registros por</label>
+            <label className="form-label">{t("tbar.groupBy")}</label>
             <select
               className="input input-sm"
               value={view.config.groupField ?? ""}
               onChange={(e) => void store.patchViewConfig({ groupField: e.target.value || undefined })}
             >
-              <option value="">(sem agrupamento)</option>
+              <option value="">{t("tbar.noGroup")}</option>
               {groupableFields.map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.name}
                 </option>
               ))}
             </select>
-            <label className="form-label">Colorir linhas pelo campo</label>
+            <label className="form-label">{t("tbar.colorBy")}</label>
             {colorableFields.length ? (
               <select
                 className="input input-sm"
                 value={view.config.colorField ?? ""}
                 onChange={(e) => void store.patchViewConfig({ colorField: e.target.value || undefined })}
               >
-                <option value="">(sem cor)</option>
+                <option value="">{t("tbar.noColor")}</option>
                 {colorableFields.map((f) => (
                   <option key={f.id} value={f.id}>
                     {f.name}
@@ -229,7 +230,7 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
                 ))}
               </select>
             ) : (
-              <p className="hint">Crie um campo de seleção única pra colorir as linhas.</p>
+              <p className="hint">{t("tbar.colorHint")}</p>
             )}
           </div>
         )}
@@ -243,7 +244,7 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
                 void importFile(store);
               }}
             >
-              📥 Importar CSV/XLSX (nova tabela)
+              {t("tbar.importNew")}
             </button>
             <button
               className="menu-item"
@@ -252,7 +253,7 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
                 setUpsertOpen(true);
               }}
             >
-              🔄 Importar/atualizar (esta tabela)
+              {t("tbar.importUpsert")}
             </button>
             <button
               className="menu-item"
@@ -261,7 +262,7 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
                 void exportTable(table, store.rows, "xlsx");
               }}
             >
-              📤 Exportar XLSX
+              {t("tbar.exportXlsx")}
             </button>
             <button
               className="menu-item"
@@ -270,7 +271,7 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
                 void exportTable(table, store.rows, "csv");
               }}
             >
-              📤 Exportar CSV
+              {t("tbar.exportCsv")}
             </button>
             <button
               className="menu-item"
@@ -279,7 +280,7 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
                 setReportOpen(true);
               }}
             >
-              🖨 Relatório / imprimir (PDF)
+              {t("tbar.report")}
             </button>
           </div>
         )}
@@ -287,7 +288,7 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
 
       <button
         className="btn"
-        title="Desfazer (Ctrl+Z)"
+        title={t("tbar.undo")}
         disabled={!store.undoStack.length}
         onClick={() => void store.undo()}
       >
@@ -295,7 +296,7 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
       </button>
       <button
         className="btn"
-        title="Refazer (Ctrl+Y)"
+        title={t("tbar.redo")}
         disabled={!store.redoStack.length}
         onClick={() => void store.redo()}
       >
@@ -303,23 +304,23 @@ export function Toolbar({ onToggleAi }: { onToggleAi: () => void }) {
       </button>
 
       <span style={{ flex: 1 }} />
-      {store.loading && <span className="muted rec-count">carregando…</span>}
+      {store.loading && <span className="muted rec-count">{t("tbar.loading")}</span>}
       <span className="muted rec-count">
-        {store.total} registro{store.total === 1 ? "" : "s"}
+        {t(store.total === 1 ? "tbar.recordOne" : "tbar.recordMany", { n: store.total })}
       </span>
       <input
         className="input search"
-        placeholder="Buscar…"
+        placeholder={t("tbar.search")}
         value={store.search}
         onChange={(e) => store.setSearch(e.target.value)}
       />
       {!isRemote() && (
-        <button className="btn" title="Automações desta tabela" onClick={() => setAutoOpen(true)}>
+        <button className="btn" title={t("tbar.autoTitle")} onClick={() => setAutoOpen(true)}>
           ⚡
         </button>
       )}
       <button className="btn ai-btn" onClick={onToggleAi}>
-        ✦ IA
+        {t("tbar.ai")}
       </button>
       {upsertOpen && <ImportModal onClose={() => setUpsertOpen(false)} />}
       {reportOpen && <ReportModal onClose={() => setReportOpen(false)} />}

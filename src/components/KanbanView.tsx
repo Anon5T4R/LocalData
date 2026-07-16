@@ -6,6 +6,7 @@ import { activeTable, activeView, useStore } from "../state/store";
 import type { Choice, RecordRow } from "../lib/types";
 import { choiceColor } from "../lib/types";
 import { CellDisplay } from "./cells";
+import { t } from "../lib/i18n";
 
 const NONE = "__none__";
 
@@ -24,14 +25,14 @@ export function KanbanView() {
   if (!groupField) {
     return (
       <div className="view-setup">
-        <p>O kanban agrupa por um campo de seleção única.</p>
+        <p>{t("kan.hint")}</p>
         {selectFields.length ? (
           <select
             className="input"
             value=""
             onChange={(e) => e.target.value && void store.patchViewConfig({ groupField: e.target.value })}
           >
-            <option value="">Escolher campo…</option>
+            <option value="">{t("common.chooseField")}</option>
             {selectFields.map((f) => (
               <option key={f.id} value={f.id}>
                 {f.name}
@@ -39,7 +40,7 @@ export function KanbanView() {
             ))}
           </select>
         ) : (
-          <p className="muted">Crie um campo do tipo "Seleção única" primeiro.</p>
+          <p className="muted">{t("kan.needSelect")}</p>
         )}
       </div>
     );
@@ -92,7 +93,7 @@ export function KanbanView() {
                   {choice.name}
                 </span>
               ) : (
-                <span className="chip chip-muted">Sem valor</span>
+                <span className="chip chip-muted">{t("kan.noValue")}</span>
               )}
               <span className="count">{items.length}</span>
             </div>
@@ -130,7 +131,7 @@ export function KanbanView() {
                     .then((id) => id != null && store.setOpenRecord(id));
                 }}
               >
-                + Novo
+                {t("kan.add")}
               </button>
             </div>
           </div>

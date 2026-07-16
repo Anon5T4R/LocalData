@@ -15,6 +15,7 @@ import { RecordModal } from "./components/RecordModal";
 import { AiPanel } from "./components/AiPanel";
 import { useExtensions } from "./lib/extensions";
 import { isRemote } from "./lib/remote";
+import { t as tr } from "./lib/i18n";
 import "./App.css";
 
 const THEME_KEY = "localdata.theme";
@@ -102,7 +103,7 @@ export default function App() {
       )}
       {store.error && (
         <div className="error-banner" onClick={() => store.setError(null)}>
-          ⚠ {store.error} <span className="muted">(clique pra fechar)</span>
+          ⚠ {store.error} <span className="muted">{tr("app.clickToClose")}</span>
         </div>
       )}
     </div>

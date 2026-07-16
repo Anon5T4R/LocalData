@@ -5,6 +5,7 @@ import { useState } from "react";
 import { activeTable, useStore } from "../state/store";
 import { pickSheet, upsertImport, type SheetData, type UpsertResult } from "../lib/importer";
 import { isComputed } from "../lib/types";
+import { t } from "../lib/i18n";
 
 export function ImportModal({ onClose }: { onClose: () => void }) {
   const store = useStore();
@@ -57,19 +58,16 @@ export function ImportModal({ onClose }: { onClose: () => void }) {
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal import-modal">
         <div className="record-modal-head">
-          <h3>Importar/atualizar — {table.name}</h3>
+          <h3>{t("im.title", { name: table.name })}</h3>
           <button className="icon-btn" onClick={onClose}>
             ×
           </button>
         </div>
 
-        <p className="muted">
-          Atualiza esta tabela a partir de uma planilha: linhas cujo campo-chave já existe são atualizadas, as demais
-          viram registros novos. As colunas casam pelo nome do cabeçalho.
-        </p>
+        <p className="muted">{t("im.desc")}</p>
 
         <button className="btn btn-sm" onClick={() => void choose()}>
-          {sheet ? "Trocar arquivo…" : "📥 Escolher planilha…"}
+          {sheet ? t("im.change") : t("im.choose")}
         </button>
 
         {err && <div className="ai-err">{err}</div>}
@@ -77,18 +75,21 @@ export function ImportModal({ onClose }: { onClose: () => void }) {
         {sheet && (
           <>
             <div className="import-summary muted">
-              {sheet.headers.length} colunas, {sheet.body.length} linhas. Casam com campos:{" "}
-              {matched.length ? matched.map((f) => f.name).join(", ") : "nenhuma (confira os cabeçalhos)"}.
+              {t("im.summary", {
+                cols: sheet.headers.length,
+                rows: sheet.body.length,
+                matched: matched.length ? matched.map((f) => f.name).join(", ") : t("im.noMatch"),
+              })}
             </div>
-            <label className="form-label">Casar registros por</label>
+            <label className="form-label">{t("im.matchBy")}</label>
             <select className="input input-sm" value={keyField} onChange={(e) => setKeyField(e.target.value)}>
-              <option value="">— escolha o campo-chave —</option>
+              <option value="">{t("im.chooseKey")}</option>
               {keyCandidates.map((f) => {
                 const inSheet = sheet.headers.some((h) => norm(h) === norm(f.name));
                 return (
                   <option key={f.id} value={f.id} disabled={!inSheet}>
                     {f.name}
-                    {inSheet ? "" : " (não está na planilha)"}
+                    {inSheet ? "" : t("im.notInSheet")}
                   </option>
                 );
               })}
@@ -96,8 +97,8 @@ export function ImportModal({ onClose }: { onClose: () => void }) {
 
             {result && (
               <div className="import-result">
-                ✓ {result.updated} atualizado(s), {result.created} criado(s)
-                {result.skipped ? `, ${result.skipped} sem chave ignorado(s)` : ""}.
+                {t("im.result", { updated: result.updated, created: result.created })}
+                {result.skipped ? t("im.resultSkipped", { skipped: result.skipped }) : ""}.
               </div>
             )}
           </>
@@ -105,10 +106,10 @@ export function ImportModal({ onClose }: { onClose: () => void }) {
 
         <div className="modal-actions">
           <button className="btn" onClick={onClose}>
-            {result ? "Fechar" : "Cancelar"}
+            {result ? t("common.close") : t("common.cancel")}
           </button>
           <button className="btn primary" disabled={!sheet || !keyField || busy} onClick={() => void run()}>
-            {busy ? "Importando…" : "Importar"}
+            {busy ? t("im.importing") : t("im.import")}
           </button>
         </div>
       </div>
