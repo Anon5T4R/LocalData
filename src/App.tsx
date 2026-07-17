@@ -16,13 +16,12 @@ import { AiPanel } from "./components/AiPanel";
 import { useExtensions } from "./lib/extensions";
 import { isRemote } from "./lib/remote";
 import { t as tr } from "./lib/i18n";
+import { loadTheme, THEME_KEY, type Theme } from "./lib/theme";
 import "./App.css";
-
-const THEME_KEY = "localdata.theme";
 
 export default function App() {
   const store = useStore();
-  const [theme, setTheme] = useState(localStorage.getItem(THEME_KEY) ?? "light");
+  const [theme, setTheme] = useState<Theme>(loadTheme);
   const [aiOpen, setAiOpen] = useState(false);
 
   useEffect(() => {
@@ -85,7 +84,7 @@ export default function App() {
         <StartScreen />
       ) : (
         <>
-          <TopBar theme={theme} onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")} />
+          <TopBar theme={theme} onSetTheme={setTheme} />
           <div className="workspace">
             <ViewSidebar />
             <main className="main">

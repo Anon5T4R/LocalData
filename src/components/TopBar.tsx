@@ -11,9 +11,10 @@ import { useOutsideClick } from "./cells";
 import { ServerPanel } from "./ServerPanel";
 import { AuditPanel } from "./AuditPanel";
 import { LocalePicker } from "./LocalePicker";
-import { t as tr } from "../lib/i18n";
+import { t as tr, type MessageKey } from "../lib/i18n";
+import { THEMES, type Theme } from "../lib/theme";
 
-export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme: () => void }) {
+export function TopBar({ theme, onSetTheme }: { theme: Theme; onSetTheme: (t: Theme) => void }) {
   const store = useStore();
   const ext = useExtensions();
   const remote = useRemote();
@@ -205,9 +206,19 @@ export function TopBar({ theme, onToggleTheme }: { theme: string; onToggleTheme:
         </button>
       )}
       <LocalePicker />
-      <button className="icon-btn" title={tr("theme.toggle")} onClick={onToggleTheme}>
-        {theme === "dark" ? "☀" : "🌙"}
-      </button>
+      <select
+        className="lang-select theme-select"
+        value={theme}
+        onChange={(e) => onSetTheme(e.target.value as Theme)}
+        title={tr("theme.title")}
+        aria-label={tr("theme.title")}
+      >
+        {THEMES.map((t) => (
+          <option key={t} value={t}>
+            {tr(`theme.${t}` as MessageKey)}
+          </option>
+        ))}
+      </select>
       <button className="btn" onClick={() => void store.closeBase()}>
         {isRemote() ? tr("tb.disconnect") : tr("tb.closeBase")}
       </button>
