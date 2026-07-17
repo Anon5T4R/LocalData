@@ -1,12 +1,29 @@
-/* LocalData — tema claro/escuro por CSS variables (padrão da suíte). */
+/* LocalData — tema claro/escuro por CSS variables (padrão da suíte).
+
+   Superfícies suavizadas (pass de 2026-07-17): o fundo não pode ser a coisa mais
+   forte da tela. Branco puro e quase-preto têm contraste máximo contra tudo e
+   roubam o foco do accent — daí `--bg2` nunca ser #fff e o `--bg` escuro subir
+   ~5 L*. Aqui `--bg2` é o painel e `--bg3` a superfície secundária. Só superfície
+   muda; `--text`/`--muted`/`--accent*` são identidade do tema. */
+
+/* Contraste do texto secundário (correção WCAG, 2026-07-17 — logo após a pass acima).
+   A ressalva "só superfície muda" do bloco anterior tem uma exceção: ao suavizar o
+   painel, o `--muted` passou a reprovar no AA (< 4.5:1) contra o `--bg2` (o painel)
+   nos temas claros. Como este app chama a var de `--muted`, os temas nomeados
+   (nature/calmgreen/pastelpink) já vieram corrigidos no pass anterior; o que faltava
+   era só o `:root` claro (4.39 -> 4.52). Em nature e pastelpink a reprovação era
+   dívida pré-existente: já falhava antes da suavização, contra o branco puro.
+   Escurecemos mexendo apenas no L* (Lab), com a/b intactos: o matiz de cada tema
+   fica igual, só a luminância cai o mínimo pra bater 4.5:1. Temas escuros não foram
+   tocados — já passavam. */
 
 :root {
-  --bg: #f7f7f9;
-  --bg2: #ffffff;
-  --bg3: #eeeef2;
+  --bg: #ededef;
+  --bg2: #f9f9fb;
+  --bg3: #e4e4e8;
   --text: #1c1c22;
-  --muted: #74747f;
-  --border: #dcdce3;
+  --muted: #72727d;
+  --border: #d2d2d9;
   --accent: #7c3aed;
   --accent-soft: #ede9fe;
   --danger: #dc2626;
@@ -15,12 +32,12 @@
 }
 
 [data-theme="dark"] {
-  --bg: #17171c;
-  --bg2: #1f1f26;
-  --bg3: #26262e;
+  --bg: #212126;
+  --bg2: #292931;
+  --bg3: #313139;
   --text: #ececf1;
   --muted: #9a9aa6;
-  --border: #34343e;
+  --border: #3f3f49;
   --accent: #a78bfa;
   --accent-soft: #2e2447;
   --shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
@@ -29,12 +46,12 @@
 /* ---------- temas nomeados (paletas fixas, sobrepõem o accent) ---------- */
 
 [data-theme="nature"] {
-  --bg: #f5f7f2;
-  --bg2: #ffffff;
-  --bg3: #eef2ea;
+  --bg: #eef1e9;
+  --bg2: #f8faf5;
+  --bg3: #e4eade;
   --text: #2e3a2e;
-  --muted: #6f7d6f;
-  --border: #e2e8dd;
+  --muted: #697669;
+  --border: #dbe3d4;
   --accent: #7a9e7e;
   --accent-soft: #e6efe1;
   --danger: #c0492f;
@@ -42,12 +59,12 @@
 }
 
 [data-theme="darkblue"] {
-  --bg: #0d1520;
-  --bg2: #131f30;
-  --bg3: #1a2942;
+  --bg: #16202e;
+  --bg2: #1d2a3c;
+  --bg3: #26374e;
   --text: #e2e8f0;
   --muted: #8595ad;
-  --border: #223049;
+  --border: #2d3f59;
   --accent: #3b82f6;
   --accent-soft: #1e3a5f;
   --danger: #f87171;
@@ -55,12 +72,12 @@
 }
 
 [data-theme="calmgreen"] {
-  --bg: #f2f5f1;
-  --bg2: #ffffff;
-  --bg3: #e9efe7;
+  --bg: #eaf0e9;
+  --bg2: #f7faf6;
+  --bg3: #dfe8dd;
   --text: #24302a;
-  --muted: #6a7a6f;
-  --border: #dde6dc;
+  --muted: #67776c;
+  --border: #d5e0d3;
   --accent: #4f7d5e;
   --accent-soft: #dcebd9;
   --danger: #c0492f;
@@ -68,12 +85,12 @@
 }
 
 [data-theme="pastelpink"] {
-  --bg: #fdf4f7;
-  --bg2: #ffffff;
-  --bg3: #f9eaf0;
+  --bg: #f8ebf0;
+  --bg2: #fdf6f9;
+  --bg3: #f2dde6;
   --text: #3a2a30;
-  --muted: #8a7580;
-  --border: #f2dfe7;
+  --muted: #806d77;
+  --border: #ecd3de;
   --accent: #e8799f;
   --accent-soft: #fbe4ee;
   --danger: #d84a6b;
@@ -81,12 +98,12 @@
 }
 
 [data-theme="punkprincess"] {
-  --bg: #120a1a;
-  --bg2: #1a0f26;
-  --bg3: #241533;
+  --bg: #1c1228;
+  --bg2: #251733;
+  --bg3: #32204a;
   --text: #f0e6ff;
   --muted: #9a86b5;
-  --border: #2c1c3d;
+  --border: #3a2850;
   --accent: #ff2d95;
   --accent-soft: #33143a;
   --danger: #ff5470;
