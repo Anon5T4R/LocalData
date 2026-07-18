@@ -1,6 +1,6 @@
 [package]
 name = "data"
-version = "0.7.2"
+version = "0.7.3"
 description = "LocalData — banco de dados visual offline (Airtable local) com IA local"
 authors = ["Taylor"]
 edition = "2021"
