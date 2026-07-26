@@ -29,6 +29,8 @@
   --danger: #dc2626;
   --shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
   --radius: 8px;
+  /* <select> no Linux: sem isto o GTK pinta o texto com a cor dele. */
+  color-scheme: light;
 }
 
 [data-theme="dark"] {
@@ -41,6 +43,8 @@
   --accent: #a78bfa;
   --accent-soft: #2e2447;
   --shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  /* <select> no Linux: sem isto o GTK pinta o texto com a cor dele. */
+  color-scheme: dark;
 }
 
 /* ---------- temas nomeados (paletas fixas, sobrepõem o accent) ---------- */
@@ -56,6 +60,8 @@
   --accent-soft: #e6efe1;
   --danger: #c0492f;
   --shadow: 0 10px 30px rgba(60, 70, 60, 0.14);
+  /* <select> no Linux: sem isto o GTK pinta o texto com a cor dele. */
+  color-scheme: light;
 }
 
 [data-theme="darkblue"] {
@@ -69,6 +75,8 @@
   --accent-soft: #1e3a5f;
   --danger: #f87171;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  /* <select> no Linux: sem isto o GTK pinta o texto com a cor dele. */
+  color-scheme: dark;
 }
 
 [data-theme="calmgreen"] {
@@ -82,6 +90,8 @@
   --accent-soft: #dcebd9;
   --danger: #c0492f;
   --shadow: 0 10px 30px rgba(60, 70, 60, 0.14);
+  /* <select> no Linux: sem isto o GTK pinta o texto com a cor dele. */
+  color-scheme: light;
 }
 
 [data-theme="pastelpink"] {
@@ -95,6 +105,8 @@
   --accent-soft: #fbe4ee;
   --danger: #d84a6b;
   --shadow: 0 10px 30px rgba(60, 70, 60, 0.14);
+  /* <select> no Linux: sem isto o GTK pinta o texto com a cor dele. */
+  color-scheme: light;
 }
 
 [data-theme="punkprincess"] {
@@ -108,6 +120,8 @@
   --accent-soft: #33143a;
   --danger: #ff5470;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  /* <select> no Linux: sem isto o GTK pinta o texto com a cor dele. */
+  color-scheme: dark;
 }
 
 * {
