@@ -37,7 +37,8 @@
         "ext": ["tbase"],
         "name": "Base de dados",
         "description": "Base de dados do LocalData",
-        "role": "Editor"
+        "role": "Editor",
+        "mimeType": "application/x-taylor-tbase"
       }
     ],
     "icon": [
