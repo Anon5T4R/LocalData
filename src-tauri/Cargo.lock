@@ -707,6 +707,7 @@ version = "0.7.11"
 dependencies = [
  "argon2",
  "base64 0.22.1",
+ "gtk",
  "regex",
  "rusqlite",
  "serde",
