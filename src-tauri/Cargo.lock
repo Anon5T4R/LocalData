@@ -703,7 +703,7 @@ dependencies = [
 
 [[package]]
 name = "data"
-version = "0.7.10"
+version = "0.7.11"
 dependencies = [
  "argon2",
  "base64 0.22.1",
